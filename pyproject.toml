@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qtpiccolor"
+version = "1.0.0"
+description = "图片颜色分析工具 - 基于 PyQt6 的桌面应用程序"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "qtPicColor Team"}
+]
+keywords = ["color", "analysis", "image", "pyqt6", "desktop"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "PyQt6>=6.4.0",
+    "Pillow>=9.0.0",
+    "scikit-learn>=1.0.0",
+    "numpy>=1.21.0",
+    "scikit-image>=0.19.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "pytest>=7.0.0",
+    "pytest-qt>=4.0.0"
+]
+
+[project.scripts]
+qtpiccolor = "qtpiccolor.main:main"
+
+[project.urls]
+Homepage = "https://github.com/qtpiccolor/qtpiccolor"
+Repository = "https://github.com/qtpiccolor/qtpiccolor.git"
+Documentation = "https://qtpiccolor.readthedocs.io"
+"Bug Tracker" = "https://github.com/qtpiccolor/qtpiccolor/issues"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ['E203', 'W503']
+exclude = [
+    '.git',
+    '__pycache__',
+    'build',
+    'dist',
+    '.venv',
+    '.eggs'
+]
