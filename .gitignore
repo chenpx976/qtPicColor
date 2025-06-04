@@ -9,3 +9,22 @@ wheels/
 # Virtual environments
 .venv
 .DS_Store
+
+# PyInstaller
+*.spec
+*.manifest
+*.exe
+*.app
+*.dmg
+*.pkg
+*.deb
+*.rpm
+
+# Build artifacts
+installer.nsi
+*.iconset/
+
+# Temporary files
+*.tmp
+*.temp
+*.log

@@ -1,0 +1,302 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+        python-version: ['3.11']
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        # 安装必要的系统依赖
+        brew install create-dmg
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install uv
+        uv sync --dev
+        # 安装打包工具
+        pip install pyinstaller
+    
+    - name: Create PyInstaller spec file
+      run: |
+        cat > qtpiccolor.spec << 'EOF'
+        # -*- mode: python ; coding: utf-8 -*-
+        import sys
+        from pathlib import Path
+
+        block_cipher = None
+
+        # 获取源码路径
+        src_path = Path('src')
+        
+        a = Analysis(
+            ['src/qtpiccolor/__main__.py'],
+            pathex=[str(src_path)],
+            binaries=[],
+            datas=[
+                ('src/qtpiccolor/resources', 'qtpiccolor/resources'),
+            ],
+            hiddenimports=[
+                'PyQt6.QtCore',
+                'PyQt6.QtGui', 
+                'PyQt6.QtWidgets',
+                'PIL',
+                'numpy',
+                'sklearn',
+                'skimage',
+            ],
+            hookspath=[],
+            hooksconfig={},
+            runtime_hooks=[],
+            excludes=[],
+            win_no_prefer_redirects=False,
+            win_private_assemblies=False,
+            cipher=block_cipher,
+            noarchive=False,
+        )
+
+        pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+        exe = EXE(
+            pyz,
+            a.scripts,
+            [],
+            exclude_binaries=True,
+            name='qtPicColor',
+            debug=False,
+            bootloader_ignore_signals=False,
+            strip=False,
+            upx=True,
+            console=False,
+            disable_windowed_traceback=False,
+            argv_emulation=False,
+            target_arch=None,
+            codesign_identity=None,
+            entitlements_file=None,
+            icon='src/qtpiccolor/resources/icon.ico' if sys.platform == 'win32' else 'src/qtpiccolor/resources/icon.icns',
+        )
+
+        coll = COLLECT(
+            exe,
+            a.binaries,
+            a.zipfiles,
+            a.datas,
+            strip=False,
+            upx=True,
+            upx_exclude=[],
+            name='qtPicColor',
+        )
+
+        if sys.platform == 'darwin':
+            app = BUNDLE(
+                coll,
+                name='qtPicColor.app',
+                icon='src/qtpiccolor/resources/icon.icns',
+                bundle_identifier='com.qtpiccolor.app',
+                info_plist={
+                    'NSPrincipalClass': 'NSApplication',
+                    'NSAppleScriptEnabled': False,
+                    'CFBundleDocumentTypes': [
+                        {
+                            'CFBundleTypeName': 'Image',
+                            'CFBundleTypeRole': 'Viewer',
+                            'LSItemContentTypes': ['public.image'],
+                        }
+                    ]
+                },
+            )
+        EOF
+    
+    - name: Create default icon files (if not exist)
+      run: |
+        mkdir -p src/qtpiccolor/resources
+        # 创建一个简单的图标占位符（实际项目中应该有真实的图标文件）
+        python -c "
+        from PIL import Image, ImageDraw
+        import os
+        
+        # 创建一个简单的图标
+        img = Image.new('RGBA', (256, 256), (70, 130, 180, 255))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([50, 50, 206, 206], fill=(255, 255, 255, 255))
+        draw.text((100, 120), 'QPC', fill=(70, 130, 180, 255))
+        
+        # 保存为不同格式
+        if os.name == 'nt':  # Windows
+            img.save('src/qtpiccolor/resources/icon.ico', format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
+        else:  # macOS
+            img.save('src/qtpiccolor/resources/icon.png')
+            # 在macOS上，我们需要创建.icns文件，但这里先用PNG
+        "
+    
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller qtpiccolor.spec --clean --noconfirm
+    
+    - name: Create DMG (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        # 创建DMG安装包
+        mkdir -p dist/dmg
+        cp -r dist/qtPicColor.app dist/dmg/
+        
+        # 创建符号链接到Applications文件夹
+        ln -s /Applications dist/dmg/Applications
+        
+        # 创建DMG
+        create-dmg \
+          --volname "qtPicColor" \
+          --volicon "src/qtpiccolor/resources/icon.png" \
+          --window-pos 200 120 \
+          --window-size 800 400 \
+          --icon-size 100 \
+          --icon "qtPicColor.app" 200 190 \
+          --hide-extension "qtPicColor.app" \
+          --app-drop-link 600 185 \
+          "dist/qtPicColor-macOS.dmg" \
+          "dist/dmg/"
+    
+    - name: Create Windows Installer
+      if: runner.os == 'Windows'
+      run: |
+        # 安装NSIS
+        choco install nsis -y
+        
+        # 创建NSIS安装脚本
+        cat > installer.nsi << 'EOF'
+        !define APPNAME "qtPicColor"
+        !define COMPANYNAME "qtPicColor Team"
+        !define DESCRIPTION "图片颜色分析工具"
+        !define VERSIONMAJOR 1
+        !define VERSIONMINOR 0
+        !define VERSIONBUILD 0
+        !define HELPURL "https://github.com/qtpiccolor/qtpiccolor"
+        !define UPDATEURL "https://github.com/qtpiccolor/qtpiccolor/releases"
+        !define ABOUTURL "https://github.com/qtpiccolor/qtpiccolor"
+        !define INSTALLSIZE 150000
+
+        RequestExecutionLevel admin
+        InstallDir "$PROGRAMFILES\${APPNAME}"
+        Name "${APPNAME}"
+        Icon "src\qtpiccolor\resources\icon.ico"
+        outFile "dist\qtPicColor-Windows-Setup.exe"
+
+        !include LogicLib.nsh
+
+        page directory
+        page instfiles
+
+        !macro VerifyUserIsAdmin
+        UserInfo::GetAccountType
+        pop $0
+        ${If} $0 != "admin"
+            messageBox mb_iconstop "需要管理员权限才能安装此程序。"
+            setErrorLevel 740
+            quit
+        ${EndIf}
+        !macroend
+
+        function .onInit
+            setShellVarContext all
+            !insertmacro VerifyUserIsAdmin
+        functionEnd
+
+        section "install"
+            setOutPath $INSTDIR
+            file /r "dist\qtPicColor\*"
+            
+            writeUninstaller "$INSTDIR\uninstall.exe"
+
+            createDirectory "$SMPROGRAMS\${APPNAME}"
+            createShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\qtPicColor.exe" "" "$INSTDIR\qtPicColor.exe"
+            createShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\qtPicColor.exe" "" "$INSTDIR\qtPicColor.exe"
+
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME} - ${DESCRIPTION}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "InstallLocation" "$\"$INSTDIR$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayIcon" "$\"$INSTDIR\qtPicColor.exe$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "Publisher" "${COMPANYNAME}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "HelpLink" "${HELPURL}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "URLUpdateInfo" "${UPDATEURL}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "URLInfoAbout" "${ABOUTURL}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayVersion" "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "VersionMajor" ${VERSIONMAJOR}
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "VersionMinor" ${VERSIONMINOR}
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "NoModify" 1
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "NoRepair" 1
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "EstimatedSize" ${INSTALLSIZE}
+        sectionEnd
+
+        section "uninstall"
+            delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
+            rmDir "$SMPROGRAMS\${APPNAME}"
+            delete "$DESKTOP\${APPNAME}.lnk"
+            
+            rmDir /r "$INSTDIR"
+            
+            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
+        sectionEnd
+        EOF
+        
+        # 编译安装程序
+        makensis installer.nsi
+    
+    - name: Create ZIP archive (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        # 创建便携版ZIP
+        Compress-Archive -Path "dist\qtPicColor\*" -DestinationPath "dist\qtPicColor-Windows-Portable.zip"
+    
+    - name: Create ZIP archive (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        # 创建便携版ZIP
+        cd dist
+        zip -r qtPicColor-macOS-Portable.zip qtPicColor.app
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: qtPicColor-${{ runner.os }}
+        path: |
+          dist/*.dmg
+          dist/*.exe
+          dist/*.zip
+        retention-days: 30
+    
+    - name: Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/*.dmg
+          dist/*.exe
+          dist/*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
