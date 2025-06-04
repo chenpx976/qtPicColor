@@ -209,9 +209,8 @@ class ImageCanvas(QWidget):
         
         # 绘制图像（如果有高亮图像则使用高亮版本）
         if self._highlightedPixmap and self._selectedColor:
-            # 高亮模式：只显示选中颜色部分，背景透明
-            # 先填充背景色
-            painter.fillRect(imgRect, QColor(248, 249, 250))  # 使用画布背景色
+            # 高亮模式：只显示选中颜色部分，使用PS风格的棋盘格透明背景
+            self._drawTransparencyGrid(painter, imgRect)
             
             # 绘制高亮图像（带透明效果）
             scaled_highlight = self._highlightedPixmap.scaled(
@@ -537,6 +536,44 @@ class ImageCanvas(QWidget):
         
         # 返回距离小于阈值的像素蒙版
         return distances < threshold
+    
+    def _drawTransparencyGrid(self, painter: QPainter, rect: QRect):
+        """
+        绘制PS风格的透明背景棋盘格
+        
+        Args:
+            painter: QPainter对象
+            rect: 绘制区域
+        """
+        grid_size = 16  # 每个格子的大小
+        light_color = QColor(255, 255, 255)  # 浅色格子
+        dark_color = QColor(204, 204, 204)   # 深色格子
+        
+        # 保存当前画笔状态
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        # 绘制棋盘格
+        for y in range(rect.top(), rect.bottom(), grid_size):
+            for x in range(rect.left(), rect.right(), grid_size):
+                # 计算当前格子应该是浅色还是深色
+                grid_x = (x - rect.left()) // grid_size
+                grid_y = (y - rect.top()) // grid_size
+                is_light = (grid_x + grid_y) % 2 == 0
+                
+                # 选择颜色
+                color = light_color if is_light else dark_color
+                painter.setBrush(QBrush(color))
+                
+                # 计算格子大小，确保不超出边界
+                width = min(grid_size, rect.right() - x)
+                height = min(grid_size, rect.bottom() - y)
+                
+                # 绘制格子
+                painter.drawRect(x, y, width, height)
+        
+        # 恢复画笔状态
+        painter.restore()
 
 
 class ImageCanvasContainer(QScrollArea):
