@@ -20,7 +20,7 @@ class ColorListWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.colors: List[ColorInfo] = []
-        self.current_format = "HEX"  # 当前显示的颜色格式
+        self.current_format = "RGB"  # 默认使用RGB格式
         self.setup_ui()
     
     def setup_ui(self):
@@ -43,28 +43,101 @@ class ColorListWidget(QWidget):
         self.format_combo.addItems(["HEX", "RGB", "HSL", "HSV"])
         self.format_combo.setCurrentText(self.current_format)
         self.format_combo.currentTextChanged.connect(self.on_format_changed)
+        self.format_combo.setFixedWidth(90)  # 增加宽度
+        self.format_combo.setFixedHeight(32)  # 设置固定高度
         self.format_combo.setStyleSheet("""
             QComboBox {
-                padding: 4px 8px;
-                border: 1px solid #ccc;
-                border-radius: 4px;
+                padding: 8px 12px;
+                border: 2px solid #007ACC;
+                border-radius: 6px;
                 background-color: white;
+                font-size: 13px;
+                font-weight: bold;
+                color: #333;
+                selection-background-color: #e3f2fd;
+            }
+            QComboBox:hover {
+                border-color: #005a9e;
+                background-color: #f8f9fa;
+            }
+            QComboBox:focus {
+                border-color: #004785;
+                outline: none;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
+                border-left-width: 2px;
+                border-left-color: #007ACC;
+                border-left-style: solid;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                background-color: #007ACC;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-style: solid;
+                border-width: 5px 4px 0px 4px;
+                border-color: white transparent transparent transparent;
+                margin-top: 2px;
+            }
+            QComboBox::down-arrow:hover {
+                border-top-color: #f0f0f0;
+            }
+            QComboBox QAbstractItemView {
+                border: 2px solid #007ACC;
+                background-color: white;
+                selection-background-color: #e3f2fd;
+                selection-color: #333;
+                outline: none;
+                border-radius: 4px;
+                margin-top: 1px;
+            }
+            QComboBox QAbstractItemView::item {
+                height: 28px;
+                padding-left: 12px;
+                padding-right: 12px;
+                border-bottom: 1px solid #eee;
+                font-size: 13px;
+                color: #333;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #f0f8ff;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #007ACC;
+                color: white;
             }
         """)
         
         header_layout.addWidget(title_label)
         header_layout.addStretch()
-        header_layout.addWidget(QLabel("格式:"))
-        header_layout.addWidget(self.format_combo)
+        
+        # 格式选择区域
+        format_container = QWidget()
+        format_layout = QHBoxLayout()
+        format_layout.setContentsMargins(0, 0, 0, 0)
+        format_layout.setSpacing(8)
+        
+        format_label = QLabel("格式:")
+        format_label.setStyleSheet("color: #555; font-size: 13px; font-weight: bold;")
+        
+        format_layout.addWidget(format_label)
+        format_layout.addWidget(self.format_combo)
+        format_container.setLayout(format_layout)
+        
+        header_layout.addWidget(format_container)
         
         # 颜色列表
         self.color_list = QListWidget()
         self.color_list.setStyleSheet("""
             QListWidget {
-                border: 1px solid #ddd;
+                border: 1px solid #e0e0e0;
                 border-radius: 6px;
                 background-color: white;
                 alternate-background-color: #f8f9fa;
+                outline: none;
             }
             QListWidget::item {
                 padding: 8px;
@@ -75,6 +148,28 @@ class ColorListWidget(QWidget):
             }
             QListWidget::item:selected {
                 background-color: #bbdefb;
+            }
+            QScrollBar:vertical {
+                background-color: #f8f9fa;
+                width: 12px;
+                border-radius: 6px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #dee2e6;
+                border-radius: 6px;
+                min-height: 20px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #adb5bd;
+            }
+            QScrollBar::handle:vertical:pressed {
+                background-color: #6c757d;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
             }
         """)
         self.color_list.setAlternatingRowColors(True)

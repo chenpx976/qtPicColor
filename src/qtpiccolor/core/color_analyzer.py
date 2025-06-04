@@ -1,28 +1,28 @@
 """颜色分析模块"""
 
 import time
-from typing import List
+import os
+from typing import List, Dict
+from collections import Counter
 import numpy as np
 from PIL import Image
-from sklearn.cluster import KMeans
-from sklearn.utils import shuffle
 
 from .models import ColorInfo, ImageInfo
 
 
 class ColorAnalyzer:
-    """颜色分析器"""
+    """颜色分析器 - 直接统计图片中所有颜色的像素数量"""
     
-    def __init__(self, max_colors: int = 16, sample_fraction: float = 0.1):
+    def __init__(self, max_colors: int = 16, min_pixels: int = 100):
         """
         初始化颜色分析器
         
         Args:
-            max_colors: 最大提取颜色数量
-            sample_fraction: 采样比例，用于加速大图像处理
+            max_colors: 最大返回颜色数量
+            min_pixels: 最小像素数量阈值，低于此值的颜色将被忽略
         """
         self.max_colors = max_colors
-        self.sample_fraction = sample_fraction
+        self.min_pixels = min_pixels
     
     def analyze_image(self, image_path: str) -> ImageInfo:
         """
@@ -36,115 +36,122 @@ class ColorAnalyzer:
         """
         start_time = time.time()
         
-        # 加载图像
+        # 获取图像基本信息
         with Image.open(image_path) as image:
-            # 转换为 RGB 格式
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            
-            # 获取图像信息
             width, height = image.size
             format_name = image.format or 'Unknown'
-            
-            # 提取颜色
-            colors = self.extract_dominant_colors(image)
-            
+        
+        # 提取颜色
+        colors = self.extract_colors_by_pixel_count(image_path)
+        
         # 计算分析时间
         analysis_time = time.time() - start_time
         
         # 获取文件大小
-        import os
         size_bytes = os.path.getsize(image_path)
         
         return ImageInfo(
             file_path=image_path,
             width=width,
             height=height,
-            format=format_name,
             size_bytes=size_bytes,
             colors=colors,
-            analysis_time=analysis_time
+            analysis_time=analysis_time,
+            format=format_name
         )
     
-    def extract_dominant_colors(self, image: Image) -> List[ColorInfo]:
+    def extract_colors_by_pixel_count(self, image_path: str) -> List[ColorInfo]:
         """
-        使用 K-means 算法提取主要颜色
+        通过统计像素数量提取颜色
         
         Args:
-            image: PIL Image 对象
+            image_path: 图像文件路径
             
         Returns:
-            List[ColorInfo]: 颜色信息列表，按占比降序排列
+            List[ColorInfo]: 按像素数量排序的颜色信息列表
         """
-        # 调整图像大小以优化性能
-        image = self._resize_for_analysis(image)
-        
-        # 将图像转换为像素数组
-        pixels = np.array(image).reshape(-1, 3)
-        
-        # 如果图像较大，进行采样以提高性能
-        if len(pixels) > 50000:
-            pixels = shuffle(pixels, random_state=42, n_samples=int(len(pixels) * self.sample_fraction))
-        
-        # 确定实际的聚类数量（不能超过像素点数量）
-        n_colors = min(self.max_colors, len(np.unique(pixels.view(np.dtype((np.void, pixels.dtype.itemsize*pixels.shape[1]))))))
-        
-        if n_colors <= 1:
-            # 如果只有一种颜色，直接返回
-            rgb = tuple(map(int, pixels[0]))
-            hex_code = self._rgb_to_hex(rgb)
-            return [ColorInfo(
-                rgb=rgb,
-                hex_code=hex_code,
-                percentage=100.0,
-                pixel_count=len(pixels)
-            )]
-        
-        # 执行 K-means 聚类
-        kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(pixels)
-        
-        # 计算每个聚类的统计信息
-        colors = []
-        total_pixels = len(pixels)
-        
-        for i, center in enumerate(kmeans.cluster_centers_):
-            mask = labels == i
-            pixel_count = np.sum(mask)
-            percentage = (pixel_count / total_pixels) * 100
-            
-            rgb = tuple(map(int, center))
-            hex_code = self._rgb_to_hex(rgb)
-            
-            colors.append(ColorInfo(
-                rgb=rgb,
-                hex_code=hex_code,
-                percentage=percentage,
-                pixel_count=pixel_count
-            ))
-        
-        # 按占比降序排列
-        return sorted(colors, key=lambda x: x.percentage, reverse=True)
+        try:
+            # 打开图像并转换为RGB
+            with Image.open(image_path) as image:
+                # 转换为RGB模式
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
+                
+                # 如果图像太大，先缩小以提高性能
+                max_size = 800
+                if max(image.size) > max_size:
+                    ratio = max_size / max(image.size)
+                    new_size = (int(image.width * ratio), int(image.height * ratio))
+                    image = image.resize(new_size, Image.Resampling.LANCZOS)
+                
+                # 转换为numpy数组
+                img_array = np.array(image)
+                
+                # 重塑为二维数组，每行是一个像素的RGB值
+                pixels = img_array.reshape(-1, 3)
+                
+                # 统计每种颜色的像素数量
+                color_counts = self._count_colors(pixels)
+                
+                # 过滤掉像素数量太少的颜色
+                filtered_colors = {
+                    color: count for color, count in color_counts.items() 
+                    if count >= self.min_pixels
+                }
+                
+                # 如果过滤后颜色太少，降低阈值
+                if len(filtered_colors) < 3:
+                    min_threshold = max(1, self.min_pixels // 10)
+                    filtered_colors = {
+                        color: count for color, count in color_counts.items() 
+                        if count >= min_threshold
+                    }
+                
+                # 按像素数量排序
+                sorted_colors = sorted(filtered_colors.items(), key=lambda x: x[1], reverse=True)
+                
+                # 转换为ColorInfo对象
+                colors = []
+                total_pixels = len(pixels)
+                
+                for i, (rgb, pixel_count) in enumerate(sorted_colors[:self.max_colors]):
+                    # 计算百分比
+                    percentage = (pixel_count / total_pixels) * 100
+                    
+                    # 确保RGB值是标准Python int类型，避免numpy类型问题
+                    rgb = tuple(int(c) for c in rgb)
+                    
+                    # 转换为HEX
+                    hex_code = self._rgb_to_hex(rgb)
+                    
+                    colors.append(ColorInfo(
+                        rgb=rgb,
+                        hex_code=hex_code,
+                        percentage=float(percentage),  # 确保是标准float类型
+                        position=(0, 0)  # 简化位置信息
+                    ))
+                
+                return colors
+                
+        except Exception as e:
+            print(f"颜色提取失败: {e}")
+            return [self._create_default_color()]
     
-    def _resize_for_analysis(self, image: Image, max_size: int = 800) -> Image:
+    def _count_colors(self, pixels: np.ndarray) -> Dict[tuple, int]:
         """
-        调整图像大小以优化分析性能
+        统计颜色出现次数
         
         Args:
-            image: PIL Image 对象
-            max_size: 最大尺寸
+            pixels: 像素数组，形状为 (n_pixels, 3)
             
         Returns:
-            Image: 调整大小后的图像
+            Dict[tuple, int]: 颜色到像素数量的映射
         """
-        if max(image.size) > max_size:
-            ratio = max_size / max(image.size)
-            new_size = (int(image.width * ratio), int(image.height * ratio))
-            return image.resize(new_size, Image.Resampling.LANCZOS)
-        return image
+        # 将每个像素转换为元组，然后统计
+        pixel_tuples = [tuple(pixel) for pixel in pixels]
+        return Counter(pixel_tuples)
     
-    @staticmethod
-    def _rgb_to_hex(rgb: tuple) -> str:
+    def _rgb_to_hex(self, rgb: tuple) -> str:
         """
         RGB 转十六进制颜色值
         
@@ -154,4 +161,18 @@ class ColorAnalyzer:
         Returns:
             str: 十六进制颜色值
         """
-        return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}".upper() 
+        return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
+    
+    def _create_default_color(self) -> ColorInfo:
+        """
+        创建默认颜色
+        
+        Returns:
+            ColorInfo: 默认的灰色
+        """
+        return ColorInfo(
+            rgb=(128, 128, 128),
+            hex_code="#808080",
+            percentage=100.0,
+            position=(0, 0)
+        ) 
