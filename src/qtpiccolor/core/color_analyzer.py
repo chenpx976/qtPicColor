@@ -77,15 +77,20 @@ class ColorAnalyzer:
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
                 
+                # 保存原始尺寸用于位置计算
+                original_width, original_height = image.size
+                
                 # 如果图像太大，先缩小以提高性能
                 max_size = 800
+                scale_factor = 1.0
                 if max(image.size) > max_size:
-                    ratio = max_size / max(image.size)
-                    new_size = (int(image.width * ratio), int(image.height * ratio))
+                    scale_factor = max_size / max(image.size)
+                    new_size = (int(image.width * scale_factor), int(image.height * scale_factor))
                     image = image.resize(new_size, Image.Resampling.LANCZOS)
                 
                 # 转换为numpy数组
                 img_array = np.array(image)
+                height, width = img_array.shape[:2]
                 
                 # 重塑为二维数组，每行是一个像素的RGB值
                 pixels = img_array.reshape(-1, 3)
@@ -124,11 +129,16 @@ class ColorAnalyzer:
                     # 转换为HEX
                     hex_code = self._rgb_to_hex(rgb)
                     
+                    # 计算该颜色在图像中的代表性位置
+                    position = self._find_color_position(img_array, rgb, scale_factor, original_width, original_height)
+                    
+                    print(f"颜色 {hex_code}: RGB{rgb}, 位置{position}, 百分比{percentage:.1f}%")
+                    
                     colors.append(ColorInfo(
                         rgb=rgb,
                         hex_code=hex_code,
                         percentage=float(percentage),  # 确保是标准float类型
-                        position=(0, 0)  # 简化位置信息
+                        position=position
                     ))
                 
                 return colors
@@ -175,4 +185,54 @@ class ColorAnalyzer:
             hex_code="#808080",
             percentage=100.0,
             position=(0, 0)
-        ) 
+        )
+    
+    def _find_color_position(self, img_array: np.ndarray, target_rgb: tuple, scale_factor: float, 
+                           original_width: int, original_height: int) -> tuple:
+        """
+        找到指定颜色在图像中的代表性位置
+        
+        Args:
+            img_array: 图像数组
+            target_rgb: 目标RGB颜色
+            scale_factor: 缩放比例
+            original_width: 原始图像宽度
+            original_height: 原始图像高度
+            
+        Returns:
+            tuple: (x, y) 位置坐标（基于原始图像尺寸）
+        """
+        try:
+            # 创建颜色蒙版，找到匹配的像素
+            target = np.array(target_rgb)
+            distances = np.linalg.norm(img_array - target, axis=2)
+            mask = distances < 30  # 颜色相似度阈值
+            
+            # 找到所有匹配像素的位置
+            y_coords, x_coords = np.where(mask)
+            
+            if len(x_coords) > 0:
+                # 计算中心位置（质心）
+                center_x = int(np.mean(x_coords))
+                center_y = int(np.mean(y_coords))
+                
+                # 转换回原始图像坐标
+                original_x = int(center_x / scale_factor)
+                original_y = int(center_y / scale_factor)
+                
+                # 确保坐标在有效范围内
+                original_x = max(0, min(original_x, original_width - 1))
+                original_y = max(0, min(original_y, original_height - 1))
+                
+                return (original_x, original_y)
+            else:
+                # 如果没找到匹配像素，返回图像中心
+                return (original_width // 2, original_height // 2)
+                
+        except Exception as e:
+            print(f"计算颜色位置失败: {e}")
+            # 返回随机但分散的位置
+            import random
+            x = random.randint(original_width // 4, original_width * 3 // 4)
+            y = random.randint(original_height // 4, original_height * 3 // 4)
+            return (x, y) 

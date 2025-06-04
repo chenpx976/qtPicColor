@@ -16,11 +16,12 @@ class ColorListWidget(QWidget):
     
     # 信号定义
     color_selected = pyqtSignal(str)  # 颜色选择信号，传递十六进制颜色值
+    highlight_cleared = pyqtSignal()  # 清除高亮信号
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.colors: List[ColorInfo] = []
-        self.current_format = "RGB"  # 默认使用RGB格式
+        self.current_format = "HEX"  # 默认使用HEX格式
         self.setup_ui()
     
     def setup_ui(self):
@@ -174,6 +175,7 @@ class ColorListWidget(QWidget):
         """)
         self.color_list.setAlternatingRowColors(True)
         self.color_list.itemClicked.connect(self.on_color_item_clicked)
+        self.color_list.itemDoubleClicked.connect(self.on_color_item_double_clicked)
         
         # 空状态标签
         self.empty_label = QLabel("请上传图片开始颜色分析")
@@ -183,6 +185,20 @@ class ColorListWidget(QWidget):
             font-size: 14px;
             padding: 40px;
         """)
+        
+        # 使用提示标签
+        self.usage_hint = QLabel("💡 提示：单击颜色可复制并高亮显示，双击可清除高亮")
+        self.usage_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.usage_hint.setStyleSheet("""
+            color: #888;
+            font-size: 12px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            margin: 5px;
+        """)
+        self.usage_hint.setVisible(False)
         
         # 操作按钮
         button_layout = QHBoxLayout()
@@ -243,6 +259,7 @@ class ColorListWidget(QWidget):
         layout.addLayout(header_layout)
         layout.addWidget(self.color_list)
         layout.addWidget(self.empty_label)
+        layout.addWidget(self.usage_hint)
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
@@ -283,6 +300,7 @@ class ColorListWidget(QWidget):
         """显示颜色列表"""
         self.color_list.setVisible(True)
         self.empty_label.setVisible(False)
+        self.usage_hint.setVisible(True)
         self.copy_all_button.setEnabled(True)
         self.clear_button.setEnabled(True)
     
@@ -290,6 +308,7 @@ class ColorListWidget(QWidget):
         """显示空状态"""
         self.color_list.setVisible(False)
         self.empty_label.setVisible(True)
+        self.usage_hint.setVisible(False)
         self.copy_all_button.setEnabled(False)
         self.clear_button.setEnabled(False)
     
@@ -305,6 +324,10 @@ class ColorListWidget(QWidget):
             color_value = widget.get_current_color_value()
             ClipboardManager.copy_text(color_value)
             self.color_selected.emit(color_value)
+    
+    def on_color_item_double_clicked(self, item: QListWidgetItem):
+        """颜色项双击处理 - 清除高亮"""
+        self.highlight_cleared.emit()
     
     def on_color_widget_clicked(self, color_value: str):
         """颜色组件点击处理"""

@@ -2,6 +2,7 @@
 
 import os
 from typing import List, Optional, Tuple
+import numpy as np
 from PyQt6.QtWidgets import QWidget, QLabel, QScrollArea, QVBoxLayout, QHBoxLayout, QToolTip
 from PyQt6.QtCore import pyqtSignal, Qt, QRect, QPoint, QSize, QTimer
 from PyQt6.QtGui import QPainter, QColor, QFont, QPen, QMouseEvent, QPixmap, QBrush
@@ -21,9 +22,11 @@ class ImageCanvas(QWidget):
         self._imageInfo: Optional[ImageInfo] = None
         self._originalPixmap: Optional[QPixmap] = None
         self._displayPixmap: Optional[QPixmap] = None
+        self._highlightedPixmap: Optional[QPixmap] = None  # 高亮显示的图像
         self._scaleFactor = 1.0
         self._showColorMarkers = True
         self._hoveredColor: Optional[ColorInfo] = None
+        self._selectedColor: Optional[str] = None  # 选中的颜色HEX值
         
         # 延迟更新定时器，避免频繁重绘
         self._updateTimer = QTimer()
@@ -53,6 +56,8 @@ class ImageCanvas(QWidget):
             imageInfo: 图像信息对象
         """
         self._imageInfo = imageInfo
+        self._selectedColor = None  # 重置选中的颜色
+        self._highlightedPixmap = None
         if imageInfo is None:
             self._originalPixmap = None
             self._displayPixmap = None
@@ -73,7 +78,6 @@ class ImageCanvas(QWidget):
         # 使用PIL加载图片，然后转换为QPixmap确保兼容性
         try:
             from PIL import Image
-            import numpy as np
             from PyQt6.QtGui import QImage
             
             # 使用PIL加载原图
@@ -203,15 +207,30 @@ class ImageCanvas(QWidget):
         shadowRect = imgRect.adjusted(2, 2, 2, 2)
         painter.fillRect(shadowRect, QColor(0, 0, 0, 30))
         
-        # 绘制图像
-        painter.drawPixmap(imgRect, self._displayPixmap)
+        # 绘制图像（如果有高亮图像则使用高亮版本）
+        if self._highlightedPixmap and self._selectedColor:
+            # 高亮模式：只显示选中颜色部分，背景透明
+            # 先填充背景色
+            painter.fillRect(imgRect, QColor(248, 249, 250))  # 使用画布背景色
+            
+            # 绘制高亮图像（带透明效果）
+            scaled_highlight = self._highlightedPixmap.scaled(
+                self._displayPixmap.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.drawPixmap(imgRect, scaled_highlight)
+        else:
+            # 正常模式：显示完整图像
+            painter.drawPixmap(imgRect, self._displayPixmap)
         
         # 绘制图像边框
         painter.setPen(QPen(QColor(200, 200, 200), 1))
         painter.drawRect(imgRect)
         
-        # 绘制颜色标记
-        if self._showColorMarkers and self._imageInfo and self._imageInfo.colors:
+        # 绘制颜色标记（只在非高亮模式下显示）
+        if self._showColorMarkers and self._imageInfo and self._imageInfo.colors and not (self._highlightedPixmap and self._selectedColor):
             self._drawColorMarkers(painter, imgRect)
         
         # 绘制悬停效果
@@ -434,6 +453,90 @@ class ImageCanvas(QWidget):
         """切换颜色标记显示"""
         self._showColorMarkers = show
         self.update()
+    
+    def highlightColor(self, hex_color: str):
+        """
+        高亮指定颜色
+        
+        Args:
+            hex_color: 要高亮的颜色HEX值
+        """
+        self._selectedColor = hex_color
+        self._createHighlightedPixmap()
+        self.update()
+    
+    def clearHighlight(self):
+        """清除颜色高亮"""
+        self._selectedColor = None
+        self._highlightedPixmap = None
+        self.update()
+    
+    def _createHighlightedPixmap(self):
+        """创建高亮显示的图像"""
+        if not self._originalPixmap or not self._selectedColor:
+            self._highlightedPixmap = None
+            return
+        
+        try:
+            from PIL import Image
+            from PyQt6.QtGui import QImage
+            
+            # 重新加载原图进行处理
+            pilImage = Image.open(self._imageInfo.file_path)
+            if pilImage.mode != 'RGB':
+                pilImage = pilImage.convert('RGB')
+            
+            # 转换为numpy数组
+            img_array = np.array(pilImage)
+            
+            # 解析选中的颜色
+            selected_rgb = self._hex_to_rgb(self._selectedColor)
+            
+            # 创建蒙版：找到与选中颜色相似的像素
+            mask = self._create_color_mask(img_array, selected_rgb, threshold=30)
+            
+            # 创建RGBA图像（带透明通道）
+            height, width = img_array.shape[:2]
+            highlighted_array = np.zeros((height, width, 4), dtype=np.uint8)
+            
+            # 只在匹配的像素位置显示原始颜色
+            highlighted_array[mask, :3] = img_array[mask]  # RGB通道
+            highlighted_array[mask, 3] = 255  # Alpha通道，完全不透明
+            # 非匹配区域的Alpha通道保持0（完全透明）
+            
+            # 转换回QPixmap，使用正确的格式
+            qimage = QImage(highlighted_array.data, width, height, width * 4, QImage.Format.Format_RGBA8888)
+            self._highlightedPixmap = QPixmap.fromImage(qimage)
+            
+            print(f"创建高亮图像: {width}x{height}, 匹配像素数: {np.sum(mask)}")
+            
+        except Exception as e:
+            print(f"创建高亮图像失败: {e}")
+            self._highlightedPixmap = None
+    
+    def _hex_to_rgb(self, hex_color: str) -> tuple:
+        """将HEX颜色转换为RGB"""
+        hex_color = hex_color.lstrip('#')
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    
+    def _create_color_mask(self, img_array: np.ndarray, target_rgb: tuple, threshold: int = 30) -> np.ndarray:
+        """
+        创建颜色蒙版
+        
+        Args:
+            img_array: 图像数组
+            target_rgb: 目标RGB颜色
+            threshold: 颜色相似度阈值
+            
+        Returns:
+            np.ndarray: 布尔蒙版，True表示相似颜色
+        """
+        # 计算每个像素与目标颜色的距离
+        target = np.array(target_rgb)
+        distances = np.linalg.norm(img_array - target, axis=2)
+        
+        # 返回距离小于阈值的像素蒙版
+        return distances < threshold
 
 
 class ImageCanvasContainer(QScrollArea):
@@ -503,4 +606,25 @@ class ImageCanvasContainer(QScrollArea):
     
     def toggleColorMarkers(self, show: bool):
         """切换颜色标记显示"""
-        self._canvas.toggleColorMarkers(show) 
+        self._canvas.toggleColorMarkers(show)
+    
+    def highlightColor(self, hex_color: str):
+        """高亮指定颜色"""
+        self._canvas.highlightColor(hex_color)
+    
+    def clearHighlight(self):
+        """清除颜色高亮"""
+        self._canvas.clearHighlight()
+
+    def resizeEvent(self, event):
+        """窗口大小改变事件"""
+        super().resizeEvent(event)
+        if self._canvas._originalPixmap:
+            # 延迟重新计算，避免频繁调整
+            self._canvas._updateTimer.start(100)
+    
+    def _delayedResizeUpdate(self):
+        """延迟的大小调整更新"""
+        if self._canvas._originalPixmap:
+            self._canvas._calculateScaleFactor()
+            self._canvas._updateDisplay() 

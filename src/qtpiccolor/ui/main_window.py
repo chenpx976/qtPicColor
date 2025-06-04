@@ -301,6 +301,7 @@ class MainWindow(QMainWindow):
         
         # 颜色列表连接
         self.color_list_widget.color_selected.connect(self.on_color_clicked)
+        self.color_list_widget.highlight_cleared.connect(self.on_highlight_cleared)
         
         # 历史记录连接
         self.history_widget.recordSelected.connect(self.onHistoryRecordSelected)
@@ -367,6 +368,16 @@ class MainWindow(QMainWindow):
     def on_color_clicked(self, hex_color: str):
         """处理颜色点击"""
         self.update_status(f"已复制颜色: {hex_color}")
+        
+        # 高亮图像中的对应颜色
+        if self.current_image_info:
+            self.image_canvas.highlightColor(hex_color)
+    
+    def on_highlight_cleared(self):
+        """处理高亮清除"""
+        if self.current_image_info:
+            self.image_canvas.clearHighlight()
+        self.update_status("已清除高亮")
     
     def onHistoryRecordSelected(self, record):
         """处理历史记录选择"""
