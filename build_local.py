@@ -34,16 +34,21 @@ def get_version():
 
 def run_command(cmd, cwd=None, dry_run=False):
     """运行命令并检查结果"""
-    print(f"运行命令: {cmd}")
     if dry_run:
-        print("(干运行模式 - 跳过实际执行)")
+        print(f"(干运行模式) 将执行命令: {cmd}")
+        # 对于某些检查命令，在干运行模式下也要实际执行
+        if cmd.startswith("which "):
+            result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+            return result.returncode == 0
         return True
     
+    print(f"运行命令: {cmd}")
     result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"命令执行失败: {result.stderr}")
         return False
-    print(f"命令输出: {result.stdout}")
+    if result.stdout.strip():
+        print(f"命令输出: {result.stdout.strip()}")
     return True
 
 def create_icon(dry_run=False):
@@ -330,16 +335,151 @@ if sys.platform == 'darwin':
     print("PyInstaller spec文件创建成功")
     return True
 
-def create_versioned_archives(version, dry_run=False):
-    """创建带版本号的压缩包"""
+def create_dmg(version, dry_run=False):
+    """创建macOS DMG安装包"""
+    if sys.platform != 'darwin':
+        return True
+        
     if dry_run:
-        print("(干运行模式) 跳过压缩包创建")
+        print("(干运行模式) 跳过DMG创建")
+        return True
+    
+    try:
+        # 验证App是否构建成功
+        app_path = Path("dist/qtPicColor.app")
+        if not app_path.exists():
+            print("✗ qtPicColor.app 不存在，无法创建DMG")
+            return False
+        
+        print("✓ 找到 qtPicColor.app，开始创建DMG...")
+        
+        # 创建DMG临时目录
+        dmg_dir = Path("dist/dmg")
+        if dmg_dir.exists():
+            shutil.rmtree(dmg_dir)
+        dmg_dir.mkdir(exist_ok=True)
+        
+        # 复制应用到DMG目录
+        shutil.copytree(app_path, dmg_dir / "qtPicColor.app")
+        
+        # 创建Applications文件夹的符号链接
+        applications_link = dmg_dir / "Applications"
+        if applications_link.exists():
+            applications_link.unlink()
+        applications_link.symlink_to("/Applications")
+        
+        # 设置DMG文件名
+        dmg_name = f"qtPicColor-v{version}-macOS.dmg"
+        dmg_path = Path("dist") / dmg_name
+        
+        # 删除可能存在的旧DMG文件
+        if dmg_path.exists():
+            dmg_path.unlink()
+        
+        print(f"创建DMG: {dmg_name}")
+        
+        # 检查是否有create-dmg工具
+        create_dmg_available = run_command("which create-dmg", dry_run=True)
+        
+        if create_dmg_available:
+            # 使用create-dmg工具
+            icon_path = Path("src/qtpiccolor/resources/icon.icns")
+            icon_arg = f'--volicon "{icon_path}"' if icon_path.exists() else ""
+            
+            cmd = f'''create-dmg \\
+              --volname "qtPicColor v{version}" \\
+              {icon_arg} \\
+              --window-pos 200 120 \\
+              --window-size 800 400 \\
+              --icon-size 100 \\
+              --icon "qtPicColor.app" 200 190 \\
+              --hide-extension "qtPicColor.app" \\
+              --app-drop-link 600 185 \\
+              --no-internet-enable \\
+              "{dmg_path}" \\
+              "{dmg_dir}/"'''
+            
+            if run_command(cmd):
+                print(f"✓ DMG创建成功: {dmg_path}")
+            else:
+                print("create-dmg失败，尝试备用方案...")
+                return create_dmg_fallback(version, dmg_dir, dmg_path)
+        else:
+            print("create-dmg不可用，使用hdiutil创建DMG...")
+            return create_dmg_fallback(version, dmg_dir, dmg_path)
+        
+        # 验证DMG文件
+        if dmg_path.exists() and dmg_path.stat().st_size > 0:
+            print(f"✓ DMG文件验证成功: {dmg_path} ({dmg_path.stat().st_size / 1024 / 1024:.1f} MB)")
+            # 清理临时文件
+            shutil.rmtree(dmg_dir)
+            return True
+        else:
+            print("✗ DMG文件创建失败或为空")
+            return False
+            
+    except Exception as e:
+        print(f"创建DMG时出错: {e}")
+        return False
+
+def create_dmg_fallback(version, dmg_dir, dmg_path):
+    """使用hdiutil创建DMG的备用方案"""
+    try:
+        # 创建临时DMG
+        temp_dmg = Path("dist/temp.dmg")
+        if temp_dmg.exists():
+            temp_dmg.unlink()
+        
+        cmd = f'hdiutil create -srcfolder "{dmg_dir}" -volname "qtPicColor v{version}" -fs HFS+ -fsargs "-c c=64,a=16,e=16" -format UDRW -size 200m "{temp_dmg}"'
+        if not run_command(cmd):
+            print("hdiutil create失败")
+            return False
+        
+        # 挂载DMG进行自定义
+        mount_dir = f"/Volumes/qtPicColor v{version}"
+        cmd = f'hdiutil attach "{temp_dmg}" -readwrite -mount required'
+        if not run_command(cmd):
+            print("hdiutil attach失败")
+            return False
+        
+        # 等待挂载完成
+        import time
+        time.sleep(2)
+        
+        # 卸载DMG
+        run_command(f'hdiutil detach "{mount_dir}"')
+        
+        # 转换为只读DMG
+        cmd = f'hdiutil convert "{temp_dmg}" -format UDZO -imagekey zlib-level=9 -o "{dmg_path}"'
+        if not run_command(cmd):
+            print("hdiutil convert失败")
+            return False
+        
+        # 清理临时文件
+        if temp_dmg.exists():
+            temp_dmg.unlink()
+        
+        print(f"✓ 备用方案DMG创建成功: {dmg_path}")
+        return True
+        
+    except Exception as e:
+        print(f"备用DMG创建失败: {e}")
+        return False
+
+def create_versioned_archives(version, dry_run=False):
+    """创建带版本号的压缩包和安装包"""
+    if dry_run:
+        print("(干运行模式) 跳过压缩包和安装包创建")
         return True
     
     try:
         if sys.platform == 'darwin':
-            # macOS: 创建带版本号的ZIP
+            # macOS: 创建DMG和便携版ZIP
             if Path("dist/qtPicColor.app").exists():
+                # 创建DMG安装包
+                create_dmg(version, dry_run)
+                
+                # 创建便携版ZIP
                 archive_name = f"qtPicColor-v{version}-macOS-Portable.zip"
                 run_command(f"cd dist && zip -r {archive_name} qtPicColor.app")
                 print(f"macOS便携版创建成功: dist/{archive_name}")
@@ -415,6 +555,20 @@ def main():
                 return 1
     
     if args.dry_run:
+        # 在macOS上检查DMG创建工具
+        if sys.platform == 'darwin':
+            print("检查macOS DMG创建工具...")
+            create_dmg_available = run_command("which create-dmg", dry_run=True)
+            hdiutil_available = run_command("which hdiutil", dry_run=True)
+            
+            if create_dmg_available:
+                print("✓ create-dmg 工具可用")
+            elif hdiutil_available:
+                print("✓ hdiutil 工具可用 (备用方案)")
+            else:
+                print("⚠ 警告: 没有找到DMG创建工具，建议安装 create-dmg:")
+                print("  brew install create-dmg")
+        
         print("=== 干运行完成 - 配置验证通过 ===")
         return 0
     
@@ -447,12 +601,28 @@ def main():
             print("应用构建失败")
             return 1
     
-    # 创建带版本号的压缩包
+    # 创建带版本号的压缩包和安装包
     create_versioned_archives(version)
     
     print("本地构建完成!")
     print(f"构建结果位于: {Path('dist').absolute()}")
     print(f"版本: {version}")
+    
+    # 显示生成的文件
+    dist_path = Path("dist")
+    if dist_path.exists():
+        print("\n生成的文件:")
+        for file in dist_path.iterdir():
+            if file.is_file() and (file.suffix in ['.dmg', '.zip'] or file.name.endswith('.exe')):
+                size_mb = file.stat().st_size / 1024 / 1024
+                print(f"  - {file.name} ({size_mb:.1f} MB)")
+        
+        if sys.platform == 'darwin' and (dist_path / "qtPicColor.app").exists():
+            app_size = sum(f.stat().st_size for f in (dist_path / "qtPicColor.app").rglob('*') if f.is_file())
+            print(f"  - qtPicColor.app ({app_size / 1024 / 1024:.1f} MB)")
+        elif sys.platform == 'win32' and (dist_path / "qtPicColor").exists():
+            folder_size = sum(f.stat().st_size for f in (dist_path / "qtPicColor").rglob('*') if f.is_file())
+            print(f"  - qtPicColor/ ({folder_size / 1024 / 1024:.1f} MB)")
     
     return 0
 

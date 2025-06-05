@@ -10,6 +10,7 @@ from datetime import datetime
 @dataclass
 class ColorInfo:
     """颜色信息数据模型"""
+
     rgb: Tuple[int, int, int]
     hex_code: str
     percentage: float
@@ -22,16 +23,20 @@ class ColorInfo:
         max_val = max(r, g, b)
         min_val = min(r, g, b)
         diff = max_val - min_val
-        
+
         # Lightness
         l = (max_val + min_val) / 2
-        
+
         if diff == 0:
             h = s = 0
         else:
             # Saturation
-            s = diff / (2 - max_val - min_val) if l > 0.5 else diff / (max_val + min_val)
-            
+            s = (
+                diff / (2 - max_val - min_val)
+                if l > 0.5
+                else diff / (max_val + min_val)
+            )
+
             # Hue
             if max_val == r:
                 h = (g - b) / diff + (6 if g < b else 0)
@@ -40,7 +45,7 @@ class ColorInfo:
             else:
                 h = (r - g) / diff + 4
             h /= 6
-        
+
         return (h * 360, s * 100, l * 100)
 
     @property
@@ -50,13 +55,13 @@ class ColorInfo:
         max_val = max(r, g, b)
         min_val = min(r, g, b)
         diff = max_val - min_val
-        
+
         # Value
         v = max_val
-        
+
         # Saturation
         s = 0 if max_val == 0 else diff / max_val
-        
+
         # Hue
         if diff == 0:
             h = 0
@@ -67,7 +72,7 @@ class ColorInfo:
         else:
             h = (r - g) / diff + 4
         h /= 6
-        
+
         return (h * 360, s * 100, v * 100)
 
     def __str__(self) -> str:
@@ -77,6 +82,7 @@ class ColorInfo:
 @dataclass
 class ImageInfo:
     """图像信息数据模型"""
+
     file_path: str
     width: int
     height: int
@@ -97,6 +103,7 @@ class ImageInfo:
 @dataclass
 class HistoryRecord:
     """历史记录"""
+
     id: str
     image_info: ImageInfo
     thumbnail_path: Optional[str] = None
@@ -110,6 +117,7 @@ class HistoryRecord:
     def display_name(self) -> str:
         """显示名称"""
         import os
+
         base_name = os.path.basename(self.image_info.file_path)
         time_str = self.created_at.strftime("%H:%M:%S")
         return f"{base_name} ({time_str})"
@@ -122,4 +130,4 @@ class HistoryRecord:
     @property
     def color_count(self) -> int:
         """颜色数量"""
-        return len(self.image_info.colors) 
+        return len(self.image_info.colors)

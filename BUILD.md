@@ -21,15 +21,17 @@ version = "1.0.0"
 
 ### 工作流说明
 
-项目包含两个GitHub Actions工作流：
+项目包含两个GitHub Actions工作流，使用官方的 `astral-sh/setup-uv` action 进行依赖管理：
 
 1. **`build.yml`** - 完整构建和发布工作流
    - 触发条件：推送标签（`v*`）或手动触发
    - 功能：构建完整的安装包并发布到GitHub Releases
+   - 特性：使用 uv 缓存加速构建，自动依赖管理
 
 2. **`test-build.yml`** - 轻量级测试工作流
    - 触发条件：推送到main/develop分支或PR到main分支
    - 功能：代码检查、测试和构建配置验证
+   - 特性：快速反馈，并行测试多个平台
 
 ### 触发构建
 
@@ -71,10 +73,19 @@ GitHub Actions 会生成以下带版本号的文件：
 - `qtPicColor-v{version}-Windows-Portable.zip` - 便携版
 
 例如，版本 1.0.0 的构建产物：
-- `qtPicColor-v1.0.0-macOS.dmg`
-- `qtPicColor-v1.0.0-Windows-Setup.exe`
-- `qtPicColor-v1.0.0-macOS-Portable.zip`
-- `qtPicColor-v1.0.0-Windows-Portable.zip`
+
+**GitHub Actions 构建:**
+- `qtPicColor-v1.0.0-macOS.dmg` - macOS DMG 安装包
+- `qtPicColor-v1.0.0-Windows-Setup.exe` - Windows NSIS 安装程序
+- `qtPicColor-v1.0.0-macOS-Portable.zip` - macOS 便携版
+- `qtPicColor-v1.0.0-Windows-Portable.zip` - Windows 便携版
+
+**本地构建产物:**
+- `qtPicColor-v1.0.0-macOS.dmg` - macOS DMG 安装包（仅 macOS）
+- `qtPicColor-v1.0.0-macOS-Portable.zip` - macOS 便携版（仅 macOS）
+- `qtPicColor-v1.0.0-Windows-Portable.zip` - Windows 便携版（仅 Windows）
+- `qtPicColor.app` - macOS 应用程序包（仅 macOS）
+- `qtPicColor/` - Windows 应用程序目录（仅 Windows）
 
 ## 本地构建
 
@@ -107,13 +118,16 @@ python get_version.py
 4. 创建 Windows 版本信息文件
 5. 安装 PyInstaller（如果需要）
 6. 执行构建过程
-7. 生成带版本号的便携版压缩包
-8. 在 `dist/` 目录生成可执行文件
+7. **macOS**: 创建 DMG 安装包和便携版 ZIP
+8. **Windows**: 创建便携版 ZIP
+9. 在 `dist/` 目录生成可执行文件和安装包
+10. 显示生成文件的大小信息
 
 **干运行模式**（`--dry-run`）：
 - 验证项目结构和配置
 - 检查依赖是否可用
 - 验证PyInstaller配置文件语法
+- **macOS**: 检查 DMG 创建工具可用性
 - 不执行实际构建，适合CI/CD测试
 
 ### 版本信息集成
@@ -156,10 +170,17 @@ pyinstaller qtpiccolor.spec --clean --noconfirm
 ### macOS
 
 **额外依赖:**
-- `create-dmg` (用于创建 DMG 文件)
+- `create-dmg` (推荐，用于创建高质量 DMG 文件)
   ```bash
   brew install create-dmg
   ```
+- `hdiutil` (系统自带，备用方案)
+
+**DMG 创建说明:**
+- 本地构建脚本会自动检测可用的 DMG 创建工具
+- 优先使用 `create-dmg` 工具（如果已安装）
+- 如果 `create-dmg` 不可用，自动使用 `hdiutil` 作为备用方案
+- 两种方案都能创建功能完整的 DMG 安装包
 
 **版本信息:**
 - DMG 卷标显示版本号：`qtPicColor v1.0.0`
@@ -410,17 +431,20 @@ datas=[
 ### GitHub Actions 特性
 
 **完整构建工作流** (`build.yml`)：
+- **现代依赖管理**: 使用官方 `astral-sh/setup-uv@v5` action
+- **智能缓存**: 基于 `uv.lock` 的依赖缓存，显著加速构建
 - **多平台构建**: 同时在 macOS 和 Windows 上构建
 - **版本号集成**: 自动读取版本号并应用到构建产物
 - **自动发布**: 标签推送时自动创建 GitHub Release
-- **构建缓存**: 缓存依赖以加速构建
 - **构建产物**: 自动上传带版本号的构建结果
 
 **测试工作流** (`test-build.yml`)：
+- **快速设置**: 使用 uv 快速安装和管理依赖
 - **代码质量检查**: 运行 flake8 和 black 检查
 - **单元测试**: 运行 pytest 测试套件
 - **导入测试**: 验证模块可以正常导入
 - **构建配置验证**: 使用干运行模式验证构建配置
+- **多平台测试**: 在 Ubuntu、macOS 和 Windows 上并行测试
 
 ### 自定义工作流
 
