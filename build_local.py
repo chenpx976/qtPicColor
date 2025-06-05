@@ -53,42 +53,88 @@ def create_icon(dry_run=False):
         return True
         
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFont
         
         # 确保资源目录存在
         resources_dir = Path("src/qtpiccolor/resources")
         resources_dir.mkdir(parents=True, exist_ok=True)
         
-        # 创建一个简单的图标
-        img = Image.new('RGBA', (256, 256), (70, 130, 180, 255))
+        # 创建一个更好看的图标
+        img = Image.new('RGBA', (512, 512), (70, 130, 180, 255))
         draw = ImageDraw.Draw(img)
-        draw.ellipse([50, 50, 206, 206], fill=(255, 255, 255, 255))
-        draw.text((100, 120), 'QPC', fill=(70, 130, 180, 255))
+        
+        # 绘制圆形背景
+        draw.ellipse([50, 50, 462, 462], fill=(255, 255, 255, 255))
+        draw.ellipse([60, 60, 452, 452], fill=(70, 130, 180, 255))
+        
+        # 绘制文字
+        try:
+            # 尝试使用系统字体
+            font = ImageFont.truetype("Arial", 120)
+        except:
+            # 如果没有找到字体，使用默认字体
+            font = ImageFont.load_default()
+        
+        # 计算文字位置
+        text = "QPC"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        x = (512 - text_width) // 2
+        y = (512 - text_height) // 2 - 20
+        
+        draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
         
         # 保存为不同格式
         if sys.platform == 'win32':
+            # Windows: 创建 ICO 文件
             img.save('src/qtpiccolor/resources/icon.ico', format='ICO', 
                     sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
+            print("Windows图标文件创建成功: icon.ico")
         else:
+            # macOS: 创建 ICNS 文件
             img.save('src/qtpiccolor/resources/icon.png')
-            # 在macOS上，可以使用iconutil创建.icns文件
+            
             if sys.platform == 'darwin':
                 # 创建iconset目录
                 iconset_dir = Path("src/qtpiccolor/resources/icon.iconset")
+                if iconset_dir.exists():
+                    shutil.rmtree(iconset_dir)
                 iconset_dir.mkdir(exist_ok=True)
                 
                 # 创建不同尺寸的图标
-                sizes = [16, 32, 64, 128, 256, 512]
-                for size in sizes:
+                icon_sizes = [
+                    (16, 'icon_16x16.png'),
+                    (32, 'icon_16x16@2x.png'),
+                    (32, 'icon_32x32.png'),
+                    (64, 'icon_32x32@2x.png'),
+                    (128, 'icon_128x128.png'),
+                    (256, 'icon_128x128@2x.png'),
+                    (256, 'icon_256x256.png'),
+                    (512, 'icon_256x256@2x.png'),
+                    (512, 'icon_512x512.png'),
+                    (1024, 'icon_512x512@2x.png'),
+                ]
+                
+                for size, filename in icon_sizes:
                     resized = img.resize((size, size), Image.Resampling.LANCZOS)
-                    resized.save(iconset_dir / f"icon_{size}x{size}.png")
-                    if size <= 256:
-                        resized.save(iconset_dir / f"icon_{size}x{size}@2x.png")
+                    resized.save(iconset_dir / filename)
                 
                 # 使用iconutil创建.icns文件
-                run_command(f"iconutil -c icns {iconset_dir}")
+                icns_path = Path("src/qtpiccolor/resources/icon.icns")
+                if icns_path.exists():
+                    icns_path.unlink()
                 
-        print("图标文件创建成功")
+                result = run_command(f"iconutil -c icns {iconset_dir} -o {icns_path}")
+                if result and icns_path.exists():
+                    print("macOS图标文件创建成功: icon.icns")
+                    # 清理临时文件
+                    shutil.rmtree(iconset_dir)
+                else:
+                    print("警告: iconutil命令失败，使用PNG作为备用图标")
+            else:
+                print("Linux图标文件创建成功: icon.png")
+                
         return True
     except ImportError:
         print("警告: PIL未安装，无法创建图标文件")
@@ -156,6 +202,7 @@ def create_spec_file(version, dry_run=False):
     """创建PyInstaller spec文件"""
     spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
 import sys
+import os
 from pathlib import Path
 
 block_cipher = None
@@ -165,7 +212,7 @@ src_path = Path('src')
 
 a = Analysis(
     ['src/qtpiccolor/__main__.py'],
-    pathex=[str(src_path)],
+    pathex=[str(src_path), str(src_path / 'qtpiccolor')],
     binaries=[],
     datas=[
         ('src/qtpiccolor/resources', 'qtpiccolor/resources'),
@@ -175,14 +222,27 @@ a = Analysis(
         'PyQt6.QtGui', 
         'PyQt6.QtWidgets',
         'PIL',
+        'PIL.Image',
+        'PIL.ImageDraw',
         'numpy',
         'sklearn',
         'skimage',
+        'qtpiccolor',
+        'qtpiccolor.main',
+        'qtpiccolor.ui',
+        'qtpiccolor.core',
+        'qtpiccolor.utils',
     ],
     hookspath=[],
     hooksconfig={{}},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'tkinter',
+        'matplotlib',
+        'scipy.tests',
+        'numpy.tests',
+        'sklearn.tests',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -231,13 +291,22 @@ if sys.platform == 'darwin':
         info_plist={{
             'NSPrincipalClass': 'NSApplication',
             'NSAppleScriptEnabled': False,
+            'NSHighResolutionCapable': True,
             'CFBundleShortVersionString': '{version}',
             'CFBundleVersion': '{version}',
+            'CFBundleDisplayName': 'qtPicColor',
+            'CFBundleName': 'qtPicColor',
+            'CFBundleExecutable': 'qtPicColor',
+            'CFBundlePackageType': 'APPL',
+            'CFBundleSignature': '????',
+            'LSMinimumSystemVersion': '10.15.0',
+            'NSRequiresAquaSystemAppearance': False,
             'CFBundleDocumentTypes': [
                 {{
                     'CFBundleTypeName': 'Image',
                     'CFBundleTypeRole': 'Viewer',
-                    'LSItemContentTypes': ['public.image'],
+                    'LSItemContentTypes': ['public.image', 'public.jpeg', 'public.png'],
+                    'CFBundleTypeExtensions': ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff'],
                 }}
             ]
         }},

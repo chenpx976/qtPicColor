@@ -52,6 +52,7 @@ jobs:
         cat > qtpiccolor.spec << 'EOF'
         # -*- mode: python ; coding: utf-8 -*-
         import sys
+        import os
         from pathlib import Path
 
         block_cipher = None
@@ -61,7 +62,7 @@ jobs:
         
         a = Analysis(
             ['src/qtpiccolor/__main__.py'],
-            pathex=[str(src_path)],
+            pathex=[str(src_path), str(src_path / 'qtpiccolor')],
             binaries=[],
             datas=[
                 ('src/qtpiccolor/resources', 'qtpiccolor/resources'),
@@ -71,14 +72,27 @@ jobs:
                 'PyQt6.QtGui', 
                 'PyQt6.QtWidgets',
                 'PIL',
+                'PIL.Image',
+                'PIL.ImageDraw',
                 'numpy',
                 'sklearn',
                 'skimage',
+                'qtpiccolor',
+                'qtpiccolor.main',
+                'qtpiccolor.ui',
+                'qtpiccolor.core',
+                'qtpiccolor.utils',
             ],
             hookspath=[],
             hooksconfig={},
             runtime_hooks=[],
-            excludes=[],
+            excludes=[
+                'tkinter',
+                'matplotlib',
+                'scipy.tests',
+                'numpy.tests',
+                'sklearn.tests',
+            ],
             win_no_prefer_redirects=False,
             win_private_assemblies=False,
             cipher=block_cipher,
@@ -127,13 +141,22 @@ jobs:
                 info_plist={
                     'NSPrincipalClass': 'NSApplication',
                     'NSAppleScriptEnabled': False,
+                    'NSHighResolutionCapable': True,
                     'CFBundleShortVersionString': '${{ steps.version.outputs.version }}',
                     'CFBundleVersion': '${{ steps.version.outputs.version }}',
+                    'CFBundleDisplayName': 'qtPicColor',
+                    'CFBundleName': 'qtPicColor',
+                    'CFBundleExecutable': 'qtPicColor',
+                    'CFBundlePackageType': 'APPL',
+                    'CFBundleSignature': '????',
+                    'LSMinimumSystemVersion': '10.15.0',
+                    'NSRequiresAquaSystemAppearance': False,
                     'CFBundleDocumentTypes': [
                         {
                             'CFBundleTypeName': 'Image',
                             'CFBundleTypeRole': 'Viewer',
-                            'LSItemContentTypes': ['public.image'],
+                            'LSItemContentTypes': ['public.image', 'public.jpeg', 'public.png'],
+                            'CFBundleTypeExtensions': ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff'],
                         }
                     ]
                 },
@@ -149,7 +172,6 @@ jobs:
         $major = $versionParts[0]
         $minor = if ($versionParts.Length -gt 1) { $versionParts[1] } else { "0" }
         $patch = if ($versionParts.Length -gt 2) { $versionParts[2] } else { "0" }
-        $build = if ($versionParts.Length -gt 3) { $versionParts[3] } else { "0" }
         
         @"
         VSVersionInfo(
@@ -186,50 +208,232 @@ jobs:
       run: |
         mkdir -p src/qtpiccolor/resources
         python -c "
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFont
         import os
+        import shutil
+        from pathlib import Path
         
-        # 创建一个简单的图标
-        img = Image.new('RGBA', (256, 256), (70, 130, 180, 255))
+        # 创建一个更好看的图标
+        img = Image.new('RGBA', (512, 512), (70, 130, 180, 255))
         draw = ImageDraw.Draw(img)
-        draw.ellipse([50, 50, 206, 206], fill=(255, 255, 255, 255))
-        draw.text((100, 120), 'QPC', fill=(70, 130, 180, 255))
+        
+        # 绘制圆形背景
+        draw.ellipse([50, 50, 462, 462], fill=(255, 255, 255, 255))
+        draw.ellipse([60, 60, 452, 452], fill=(70, 130, 180, 255))
+        
+        # 绘制文字
+        try:
+            font = ImageFont.truetype('Arial', 120)
+        except:
+            font = ImageFont.load_default()
+        
+        text = 'QPC'
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        x = (512 - text_width) // 2
+        y = (512 - text_height) // 2 - 20
+        
+        draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
         
         # 保存为不同格式
         if os.name == 'nt':  # Windows
             img.save('src/qtpiccolor/resources/icon.ico', format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
-        else:  # macOS
+            print('Windows图标文件创建成功')
+        else:  # macOS/Linux
             img.save('src/qtpiccolor/resources/icon.png')
-            # 在macOS上，我们需要创建.icns文件，但这里先用PNG
+            print('PNG图标文件创建成功')
         "
+    
+    - name: Create macOS icon (ICNS)
+      if: runner.os == 'macOS'
+      run: |
+        # 创建iconset目录结构
+        mkdir -p src/qtpiccolor/resources/icon.iconset
+        
+        # 使用Python创建不同尺寸的图标
+        python -c "
+        from PIL import Image
+        import os
+        
+        # 读取基础图标
+        base_img = Image.open('src/qtpiccolor/resources/icon.png')
+        
+        # 创建不同尺寸的图标
+        icon_sizes = [
+            (16, 'icon_16x16.png'),
+            (32, 'icon_16x16@2x.png'),
+            (32, 'icon_32x32.png'),
+            (64, 'icon_32x32@2x.png'),
+            (128, 'icon_128x128.png'),
+            (256, 'icon_128x128@2x.png'),
+            (256, 'icon_256x256.png'),
+            (512, 'icon_256x256@2x.png'),
+            (512, 'icon_512x512.png'),
+            (1024, 'icon_512x512@2x.png'),
+        ]
+        
+        for size, filename in icon_sizes:
+            resized = base_img.resize((size, size), Image.Resampling.LANCZOS)
+            resized.save(f'src/qtpiccolor/resources/icon.iconset/{filename}')
+        
+        print('iconset文件创建完成')
+        "
+        
+        # 使用iconutil创建.icns文件
+        iconutil -c icns src/qtpiccolor/resources/icon.iconset -o src/qtpiccolor/resources/icon.icns
+        
+        # 验证文件是否创建成功
+        if [ -f "src/qtpiccolor/resources/icon.icns" ]; then
+            echo "✓ macOS图标文件创建成功: icon.icns"
+            ls -la src/qtpiccolor/resources/icon.icns
+        else
+            echo "✗ macOS图标文件创建失败"
+            exit 1
+        fi
+        
+        # 清理临时文件
+        rm -rf src/qtpiccolor/resources/icon.iconset
     
     - name: Build with PyInstaller
       run: |
         pyinstaller qtpiccolor.spec --clean --noconfirm
     
+    - name: Test built application
+      run: |
+        echo "测试构建的应用程序..."
+        
+        if [ "$RUNNER_OS" = "macOS" ]; then
+            # macOS测试
+            if [ -d "dist/qtPicColor.app" ]; then
+                echo "✓ qtPicColor.app 存在"
+                ls -la dist/qtPicColor.app/Contents/MacOS/
+                
+                # 测试应用程序是否可以启动（无GUI模式）
+                echo "测试应用程序启动..."
+                timeout 10s dist/qtPicColor.app/Contents/MacOS/qtPicColor --help || echo "应用程序测试完成"
+            else
+                echo "✗ qtPicColor.app 不存在"
+                exit 1
+            fi
+        elif [ "$RUNNER_OS" = "Windows" ]; then
+            # Windows测试
+            if [ -f "dist/qtPicColor/qtPicColor.exe" ]; then
+                echo "✓ qtPicColor.exe 存在"
+                ls -la dist/qtPicColor/
+                
+                # 测试应用程序是否可以启动（无GUI模式）
+                echo "测试应用程序启动..."
+                timeout 10s dist/qtPicColor/qtPicColor.exe --help || echo "应用程序测试完成"
+            else
+                echo "✗ qtPicColor.exe 不存在"
+                exit 1
+            fi
+        fi
+    
     - name: Create DMG (macOS)
       if: runner.os == 'macOS'
       run: |
         VERSION="${{ steps.version.outputs.version }}"
-        # 创建DMG安装包
-        mkdir -p dist/dmg
-        cp -r dist/qtPicColor.app dist/dmg/
         
-        # 创建符号链接到Applications文件夹
-        ln -s /Applications dist/dmg/Applications
+        # 验证App是否构建成功
+        if [ ! -d "dist/qtPicColor.app" ]; then
+            echo "✗ qtPicColor.app 不存在，无法创建DMG"
+            exit 1
+        fi
+        
+        echo "✓ 找到 qtPicColor.app，开始创建DMG..."
+        ls -la dist/qtPicColor.app
+        
+        # 创建DMG临时目录
+        DMG_DIR="dist/dmg"
+        mkdir -p "$DMG_DIR"
+        
+        # 复制应用到DMG目录
+        cp -R dist/qtPicColor.app "$DMG_DIR/"
+        
+        # 创建Applications文件夹的符号链接
+        ln -s /Applications "$DMG_DIR/Applications"
+        
+        # 设置DMG文件名
+        DMG_NAME="qtPicColor-v$VERSION-macOS.dmg"
+        DMG_PATH="dist/$DMG_NAME"
+        
+        # 删除可能存在的旧DMG文件
+        rm -f "$DMG_PATH"
+        
+        echo "创建DMG: $DMG_NAME"
         
         # 创建DMG
-        create-dmg \
-          --volname "qtPicColor v$VERSION" \
-          --volicon "src/qtpiccolor/resources/icon.png" \
-          --window-pos 200 120 \
-          --window-size 800 400 \
-          --icon-size 100 \
-          --icon "qtPicColor.app" 200 190 \
-          --hide-extension "qtPicColor.app" \
-          --app-drop-link 600 185 \
-          "dist/qtPicColor-v$VERSION-macOS.dmg" \
-          "dist/dmg/" || echo "DMG creation failed, but continuing..."
+        if command -v create-dmg >/dev/null 2>&1; then
+            # 使用create-dmg工具
+            create-dmg \
+              --volname "qtPicColor v$VERSION" \
+              --volicon "src/qtpiccolor/resources/icon.icns" \
+              --window-pos 200 120 \
+              --window-size 800 400 \
+              --icon-size 100 \
+              --icon "qtPicColor.app" 200 190 \
+              --hide-extension "qtPicColor.app" \
+              --app-drop-link 600 185 \
+              --no-internet-enable \
+              "$DMG_PATH" \
+              "$DMG_DIR/"
+        else
+            # 备用方案：使用hdiutil
+            echo "create-dmg不可用，使用hdiutil创建DMG..."
+            
+            # 创建临时DMG
+            TEMP_DMG="dist/temp.dmg"
+            hdiutil create -srcfolder "$DMG_DIR" -volname "qtPicColor v$VERSION" -fs HFS+ -fsargs "-c c=64,a=16,e=16" -format UDRW -size 200m "$TEMP_DMG"
+            
+            # 挂载DMG进行自定义
+            MOUNT_DIR="/Volumes/qtPicColor v$VERSION"
+            hdiutil attach "$TEMP_DMG" -readwrite -mount required
+            
+            # 等待挂载完成
+            sleep 2
+            
+            # 设置窗口属性（如果可能）
+            if [ -d "$MOUNT_DIR" ]; then
+                echo "设置DMG窗口属性..."
+                # 这里可以添加更多的窗口自定义设置
+            fi
+            
+            # 卸载DMG
+            hdiutil detach "$MOUNT_DIR" || true
+            
+            # 转换为只读DMG
+            hdiutil convert "$TEMP_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG_PATH"
+            
+            # 清理临时文件
+            rm -f "$TEMP_DMG"
+        fi
+        
+        # 验证DMG是否创建成功
+        if [ -f "$DMG_PATH" ]; then
+            echo "✓ DMG创建成功: $DMG_NAME"
+            ls -la "$DMG_PATH"
+            
+            # 验证DMG内容
+            echo "验证DMG内容..."
+            hdiutil attach "$DMG_PATH" -readonly -mount required
+            sleep 2
+            if [ -d "/Volumes/qtPicColor v$VERSION/qtPicColor.app" ]; then
+                echo "✓ DMG内容验证成功"
+                hdiutil detach "/Volumes/qtPicColor v$VERSION" || true
+            else
+                echo "✗ DMG内容验证失败"
+                hdiutil detach "/Volumes/qtPicColor v$VERSION" || true
+                exit 1
+            fi
+        else
+            echo "✗ DMG创建失败"
+            exit 1
+        fi
+        
+        # 清理临时目录
+        rm -rf "$DMG_DIR"
     
     - name: Create Windows Installer
       if: runner.os == 'Windows'

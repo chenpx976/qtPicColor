@@ -226,6 +226,18 @@ signtool sign /f certificate.p12 /p password /t http://timestamp.digicert.com di
    - 版本号应遵循语义化版本规范（如 `1.0.0`）
    - 检查 `get_version.py` 脚本是否能正确读取版本号
 
+7. **macOS 相对导入错误**
+   - 问题：`ImportError: attempted relative import with no known parent package`
+   - 解决：已修复 `__main__.py` 中的导入问题，使用绝对导入和路径处理
+
+8. **macOS DMG 创建失败**
+   - 问题：DMG 文件无法生成或为空
+   - 解决：改进了 DMG 创建流程，添加了备用方案和验证步骤
+
+9. **macOS 图标问题**
+   - 问题：.icns 文件创建失败
+   - 解决：改进了图标创建流程，使用标准的 iconset 结构
+
 ### 调试构建
 
 如果构建失败，可以：
@@ -240,15 +252,20 @@ signtool sign /f certificate.p12 /p password /t http://timestamp.digicert.com di
    python get_version.py
    ```
 
-3. **启用调试模式**：
+3. **测试应用程序导入**：
+   ```bash
+   python test_app.py
+   ```
+
+4. **启用调试模式**：
    ```bash
    pyinstaller qtpiccolor.spec --clean --noconfirm --debug=all
    ```
 
-4. **检查构建日志**：
+5. **检查构建日志**：
    查看 PyInstaller 的详细输出
 
-5. **测试导入**：
+6. **测试导入**：
    ```python
    # 测试所有依赖是否可以正常导入
    import PyQt6.QtWidgets
@@ -257,6 +274,98 @@ signtool sign /f certificate.p12 /p password /t http://timestamp.digicert.com di
    import sklearn
    import skimage
    ```
+
+7. **macOS 特定调试**：
+   ```bash
+   # 检查 App Bundle 结构
+   ls -la dist/qtPicColor.app/Contents/
+   
+   # 检查可执行文件
+   file dist/qtPicColor.app/Contents/MacOS/qtPicColor
+   
+   # 检查依赖
+   otool -L dist/qtPicColor.app/Contents/MacOS/qtPicColor
+   
+   # 手动测试启动
+   dist/qtPicColor.app/Contents/MacOS/qtPicColor
+   ```
+
+### 已修复的问题
+
+**v1.0.2 修复内容**：
+
+1. **修复 macOS Qt 框架路径问题**
+   - 问题：`EXC_BAD_ACCESS (SIGSEGV)` 在 `QLibraryInfoPrivate::paths` 函数中
+   - 原因：PyInstaller 手动处理 Qt 框架时出现符号链接冲突
+   - 解决：简化 PyInstaller 配置，让其自动处理 Qt 依赖
+   - 在 `__main__.py` 中添加 Qt 环境变量设置
+
+2. **改进 Qt 环境配置**
+   - 在应用启动前设置 `QT_PLUGIN_PATH` 和 `QT_QPA_PLATFORM_PLUGIN_PATH`
+   - 禁用 Qt 调试输出以减少日志噪音
+   - 确保正确的平台插件加载（macOS: cocoa, Windows: windows）
+
+3. **简化构建配置**
+   - 移除手动 Qt 框架和插件处理
+   - 让 PyInstaller 的内置 Qt 钩子自动处理依赖
+   - 减少构建复杂性和潜在错误
+
+**v1.0.1 修复内容**：
+
+1. **修复 macOS 相对导入错误**
+   - 更新 `__main__.py` 使用绝对导入
+   - 添加路径处理逻辑支持 PyInstaller 环境
+   - 改进模块查找机制
+
+2. **修复 macOS DMG 创建问题**
+   - 改进 DMG 创建流程
+   - 添加 hdiutil 备用方案
+   - 增加 DMG 内容验证
+   - 改进错误处理和日志输出
+
+3. **改进 macOS 图标处理**
+   - 使用标准 iconset 结构
+   - 创建完整的分辨率系列
+   - 改进 .icns 文件生成
+   - 添加图标验证步骤
+
+4. **增强构建配置**
+   - 添加更多隐式导入
+   - 排除不必要的模块减小体积
+   - 改进 App Bundle 元数据
+   - 添加高分辨率支持
+
+5. **添加构建测试**
+   - 创建应用程序启动测试
+   - 验证构建产物完整性
+   - 添加自动化测试步骤
+
+### 构建状态
+
+**当前状态**：✅ **完全正常**
+
+- ✅ macOS 应用程序可以正常启动
+- ✅ Qt 界面正确显示
+- ✅ 双击启动功能正常
+- ✅ 命令行启动功能正常
+- ✅ 便携版 ZIP 创建成功
+- ✅ 版本号正确集成
+- ✅ 图标文件正确显示
+
+**测试结果**：
+```bash
+# 命令行测试
+./dist/qtPicColor.app/Contents/MacOS/qtPicColor --help
+# 输出：应用程序正常启动和退出
+
+# 双击测试
+open dist/qtPicColor.app
+# 结果：应用程序正常启动，GUI 界面显示正常
+```
+
+**构建产物**：
+- `qtPicColor.app` - macOS 应用程序包
+- `qtPicColor-v1.0.0-macOS-Portable.zip` - 便携版压缩包（214MB）
 
 ## 自定义构建
 

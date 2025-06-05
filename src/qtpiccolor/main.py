@@ -1,9 +1,16 @@
-"""应用程序主入口"""
+#!/usr/bin/env python3
+"""
+qtPicColor 主程序
+"""
 
 import sys
+import os
 import logging
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
+from pathlib import Path
+
+from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel, QFileDialog, QScrollArea, QFrame, QSizePolicy, QMessageBox
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
 
 from .ui.main_window import MainWindow
 
