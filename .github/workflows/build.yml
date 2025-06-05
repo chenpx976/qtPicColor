@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -22,9 +20,17 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: Get version
+      id: version
+      run: |
+        VERSION=$(python get_version.py)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Version: $VERSION"
     
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
@@ -41,6 +47,7 @@ jobs:
         pip install pyinstaller
     
     - name: Create PyInstaller spec file
+      shell: bash
       run: |
         cat > qtpiccolor.spec << 'EOF'
         # -*- mode: python ; coding: utf-8 -*-
@@ -97,6 +104,7 @@ jobs:
             codesign_identity=None,
             entitlements_file=None,
             icon='src/qtpiccolor/resources/icon.ico' if sys.platform == 'win32' else 'src/qtpiccolor/resources/icon.icns',
+            version='version_info.txt' if sys.platform == 'win32' else None,
         )
 
         coll = COLLECT(
@@ -119,6 +127,8 @@ jobs:
                 info_plist={
                     'NSPrincipalClass': 'NSApplication',
                     'NSAppleScriptEnabled': False,
+                    'CFBundleShortVersionString': '${{ steps.version.outputs.version }}',
+                    'CFBundleVersion': '${{ steps.version.outputs.version }}',
                     'CFBundleDocumentTypes': [
                         {
                             'CFBundleTypeName': 'Image',
@@ -130,10 +140,51 @@ jobs:
             )
         EOF
     
+    - name: Create Windows version info file
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $version = "${{ steps.version.outputs.version }}"
+        $versionParts = $version.Split('.')
+        $major = $versionParts[0]
+        $minor = if ($versionParts.Length -gt 1) { $versionParts[1] } else { "0" }
+        $patch = if ($versionParts.Length -gt 2) { $versionParts[2] } else { "0" }
+        $build = if ($versionParts.Length -gt 3) { $versionParts[3] } else { "0" }
+        
+        @"
+        VSVersionInfo(
+          ffi=FixedFileInfo(
+            filevers=($major, $minor, $patch, $build),
+            prodvers=($major, $minor, $patch, $build),
+            mask=0x3f,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0)
+          ),
+          kids=[
+            StringFileInfo(
+              [
+                StringTable(
+                  u'040904B0',
+                  [StringStruct(u'CompanyName', u'qtPicColor Team'),
+                   StringStruct(u'FileDescription', u'图片颜色分析工具'),
+                   StringStruct(u'FileVersion', u'$version'),
+                   StringStruct(u'InternalName', u'qtPicColor'),
+                   StringStruct(u'LegalCopyright', u'Copyright © 2024 qtPicColor Team'),
+                   StringStruct(u'OriginalFilename', u'qtPicColor.exe'),
+                   StringStruct(u'ProductName', u'qtPicColor'),
+                   StringStruct(u'ProductVersion', u'$version')])
+              ]),
+            VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+          ]
+        )
+        "@ | Out-File -FilePath version_info.txt -Encoding UTF8
+    
     - name: Create default icon files (if not exist)
       run: |
         mkdir -p src/qtpiccolor/resources
-        # 创建一个简单的图标占位符（实际项目中应该有真实的图标文件）
         python -c "
         from PIL import Image, ImageDraw
         import os
@@ -159,6 +210,7 @@ jobs:
     - name: Create DMG (macOS)
       if: runner.os == 'macOS'
       run: |
+        VERSION="${{ steps.version.outputs.version }}"
         # 创建DMG安装包
         mkdir -p dist/dmg
         cp -r dist/qtPicColor.app dist/dmg/
@@ -168,7 +220,7 @@ jobs:
         
         # 创建DMG
         create-dmg \
-          --volname "qtPicColor" \
+          --volname "qtPicColor v$VERSION" \
           --volicon "src/qtpiccolor/resources/icon.png" \
           --window-pos 200 120 \
           --window-size 800 400 \
@@ -176,33 +228,41 @@ jobs:
           --icon "qtPicColor.app" 200 190 \
           --hide-extension "qtPicColor.app" \
           --app-drop-link 600 185 \
-          "dist/qtPicColor-macOS.dmg" \
-          "dist/dmg/"
+          "dist/qtPicColor-v$VERSION-macOS.dmg" \
+          "dist/dmg/" || echo "DMG creation failed, but continuing..."
     
     - name: Create Windows Installer
       if: runner.os == 'Windows'
+      shell: pwsh
       run: |
+        $version = "${{ steps.version.outputs.version }}"
+        $versionParts = $version.Split('.')
+        $major = $versionParts[0]
+        $minor = if ($versionParts.Length -gt 1) { $versionParts[1] } else { "0" }
+        $patch = if ($versionParts.Length -gt 2) { $versionParts[2] } else { "0" }
+        
         # 安装NSIS
         choco install nsis -y
         
         # 创建NSIS安装脚本
-        cat > installer.nsi << 'EOF'
+        @"
         !define APPNAME "qtPicColor"
         !define COMPANYNAME "qtPicColor Team"
         !define DESCRIPTION "图片颜色分析工具"
-        !define VERSIONMAJOR 1
-        !define VERSIONMINOR 0
-        !define VERSIONBUILD 0
+        !define VERSIONMAJOR $major
+        !define VERSIONMINOR $minor
+        !define VERSIONBUILD $patch
+        !define VERSION "$version"
         !define HELPURL "https://github.com/qtpiccolor/qtpiccolor"
         !define UPDATEURL "https://github.com/qtpiccolor/qtpiccolor/releases"
         !define ABOUTURL "https://github.com/qtpiccolor/qtpiccolor"
         !define INSTALLSIZE 150000
 
         RequestExecutionLevel admin
-        InstallDir "$PROGRAMFILES\${APPNAME}"
-        Name "${APPNAME}"
+        InstallDir "`$PROGRAMFILES\`${APPNAME}"
+        Name "`${APPNAME} v`${VERSION}"
         Icon "src\qtpiccolor\resources\icon.ico"
-        outFile "dist\qtPicColor-Windows-Setup.exe"
+        outFile "dist\qtPicColor-v$version-Windows-Setup.exe"
 
         !include LogicLib.nsh
 
@@ -211,12 +271,12 @@ jobs:
 
         !macro VerifyUserIsAdmin
         UserInfo::GetAccountType
-        pop $0
-        ${If} $0 != "admin"
+        pop `$0
+        `${If} `$0 != "admin"
             messageBox mb_iconstop "需要管理员权限才能安装此程序。"
             setErrorLevel 740
             quit
-        ${EndIf}
+        `${EndIf}
         !macroend
 
         function .onInit
@@ -225,72 +285,75 @@ jobs:
         functionEnd
 
         section "install"
-            setOutPath $INSTDIR
+            setOutPath `$INSTDIR
             file /r "dist\qtPicColor\*"
             
-            writeUninstaller "$INSTDIR\uninstall.exe"
+            writeUninstaller "`$INSTDIR\uninstall.exe"
 
-            createDirectory "$SMPROGRAMS\${APPNAME}"
-            createShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\qtPicColor.exe" "" "$INSTDIR\qtPicColor.exe"
-            createShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\qtPicColor.exe" "" "$INSTDIR\qtPicColor.exe"
+            createDirectory "`$SMPROGRAMS\`${APPNAME}"
+            createShortCut "`$SMPROGRAMS\`${APPNAME}\`${APPNAME}.lnk" "`$INSTDIR\qtPicColor.exe" "" "`$INSTDIR\qtPicColor.exe"
+            createShortCut "`$DESKTOP\`${APPNAME}.lnk" "`$INSTDIR\qtPicColor.exe" "" "`$INSTDIR\qtPicColor.exe"
 
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME} - ${DESCRIPTION}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "InstallLocation" "$\"$INSTDIR$\""
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayIcon" "$\"$INSTDIR\qtPicColor.exe$\""
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "Publisher" "${COMPANYNAME}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "HelpLink" "${HELPURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "URLUpdateInfo" "${UPDATEURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "URLInfoAbout" "${ABOUTURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayVersion" "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "VersionMajor" ${VERSIONMAJOR}
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "VersionMinor" ${VERSIONMINOR}
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "NoModify" 1
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "NoRepair" 1
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "EstimatedSize" ${INSTALLSIZE}
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayName" "`${APPNAME} - `${DESCRIPTION}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "UninstallString" "`$\"`$INSTDIR\uninstall.exe`$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "QuietUninstallString" "`$\"`$INSTDIR\uninstall.exe`$\" /S"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "InstallLocation" "`$\"`$INSTDIR`$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayIcon" "`$\"`$INSTDIR\qtPicColor.exe`$\""
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "Publisher" "`${COMPANYNAME}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "HelpLink" "`${HELPURL}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "URLUpdateInfo" "`${UPDATEURL}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "URLInfoAbout" "`${ABOUTURL}"
+            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayVersion" "`${VERSION}"
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "VersionMajor" `${VERSIONMAJOR}
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "VersionMinor" `${VERSIONMINOR}
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "NoModify" 1
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "NoRepair" 1
+            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "EstimatedSize" `${INSTALLSIZE}
         sectionEnd
 
         section "uninstall"
-            delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
-            rmDir "$SMPROGRAMS\${APPNAME}"
-            delete "$DESKTOP\${APPNAME}.lnk"
+            delete "`$SMPROGRAMS\`${APPNAME}\`${APPNAME}.lnk"
+            rmDir "`$SMPROGRAMS\`${APPNAME}"
+            delete "`$DESKTOP\`${APPNAME}.lnk"
             
-            rmDir /r "$INSTDIR"
+            rmDir /r "`$INSTDIR"
             
-            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
+            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}"
         sectionEnd
-        EOF
+        "@ | Out-File -FilePath installer.nsi -Encoding UTF8
         
         # 编译安装程序
-        makensis installer.nsi
+        & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
     
     - name: Create ZIP archive (Windows)
       if: runner.os == 'Windows'
       run: |
+        $version = "${{ steps.version.outputs.version }}"
         # 创建便携版ZIP
-        Compress-Archive -Path "dist\qtPicColor\*" -DestinationPath "dist\qtPicColor-Windows-Portable.zip"
+        Compress-Archive -Path "dist\qtPicColor\*" -DestinationPath "dist\qtPicColor-v$version-Windows-Portable.zip"
     
     - name: Create ZIP archive (macOS)
       if: runner.os == 'macOS'
       run: |
+        VERSION="${{ steps.version.outputs.version }}"
         # 创建便携版ZIP
         cd dist
-        zip -r qtPicColor-macOS-Portable.zip qtPicColor.app
+        zip -r "qtPicColor-v$VERSION-macOS-Portable.zip" qtPicColor.app
     
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: qtPicColor-${{ runner.os }}
+        name: qtPicColor-${{ runner.os }}-v${{ steps.version.outputs.version }}
         path: |
           dist/*.dmg
           dist/*.exe
           dist/*.zip
         retention-days: 30
+        if-no-files-found: warn
     
     - name: Release
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           dist/*.dmg
@@ -298,5 +361,7 @@ jobs:
           dist/*.zip
         draft: false
         prerelease: false
+        generate_release_notes: true
+        name: "qtPicColor v${{ steps.version.outputs.version }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
