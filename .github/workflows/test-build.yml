@@ -34,23 +34,23 @@ jobs:
     - name: Run linting
       run: |
         # 安装代码检查工具
-        pip install flake8 black
+        uv add flake8 black
         # 运行代码格式检查
-        black --check src/ || echo "Code formatting issues found"
+        uv run black --check src/ || echo "Code formatting issues found"
         # 运行代码质量检查
-        flake8 src/ || echo "Code quality issues found"
+        uv run flake8 src/ || echo "Code quality issues found"
     
     - name: Run tests
       run: |
         # 安装测试依赖
-        pip install pytest pytest-qt
+        uv add pytest pytest-qt
         # 运行测试
-        python -m pytest tests/ -v || echo "Some tests failed"
+        uv run python -m pytest tests/ -v || echo "Some tests failed"
     
     - name: Test import
       run: |
         # 测试主要模块是否可以正常导入
-        python -c "
+        uv run python -c "
         try:
             import sys
             sys.path.insert(0, 'src')
@@ -64,5 +64,5 @@ jobs:
     - name: Test PyInstaller spec generation
       if: matrix.os != 'ubuntu-latest'  # 跳过Linux，因为我们主要关注桌面平台
       run: |
-        pip install pyinstaller
-        python build_local.py --dry-run || echo "Build script test completed" 
+        uv add pyinstaller
+        uv run python build_local.py --dry-run || echo "Build script test completed" 

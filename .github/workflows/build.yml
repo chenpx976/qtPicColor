@@ -28,7 +28,7 @@ jobs:
     - name: Get version
       id: version
       run: |
-        VERSION=$(python get_version.py)
+        VERSION=$(uv run python get_version.py)
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Version: $VERSION"
     
@@ -43,8 +43,8 @@ jobs:
         python -m pip install --upgrade pip
         pip install uv
         uv sync --dev
-        # 安装打包工具
-        pip install pyinstaller
+        # 使用 uv 安装额外的构建依赖
+        uv add pyinstaller
     
     - name: Create PyInstaller spec file
       shell: bash
@@ -207,7 +207,7 @@ jobs:
     - name: Create default icon files (if not exist)
       run: |
         mkdir -p src/qtpiccolor/resources
-        python -c "
+        uv run python -c "
         from PIL import Image, ImageDraw, ImageFont
         import os
         import shutil
@@ -252,7 +252,7 @@ jobs:
         mkdir -p src/qtpiccolor/resources/icon.iconset
         
         # 使用Python创建不同尺寸的图标
-        python -c "
+        uv run python -c "
         from PIL import Image
         import os
         
@@ -297,7 +297,7 @@ jobs:
     
     - name: Build with PyInstaller
       run: |
-        pyinstaller qtpiccolor.spec --clean --noconfirm
+        uv run pyinstaller qtpiccolor.spec --clean --noconfirm
     
     - name: Test built application
       run: |
