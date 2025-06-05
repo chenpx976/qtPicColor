@@ -8,12 +8,11 @@ on:
 
 jobs:
   build:
+    runs-on: macos-latest
+    
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
         python-version: ['3.11']
-    
-    runs-on: ${{ matrix.os }}
     
     steps:
     - name: Checkout code
@@ -33,7 +32,12 @@ jobs:
         python-version-file: ".python-version"
     
     - name: Install dependencies
-      run: uv sync --locked --all-extras --dev
+      run: |
+        echo "开始安装依赖..."
+        uv sync --locked --all-extras --dev
+        echo "依赖安装完成"
+        echo "已安装的包："
+        uv pip list
     
     - name: Get version
       id: version
@@ -43,9 +47,12 @@ jobs:
         echo "Version: $VERSION"
     
     - name: Install system dependencies (macOS)
-      if: runner.os == 'macOS'
       run: |
-        # 安装必要的系统依赖
+        # 检查系统资源
+        echo "系统信息："
+        system_profiler SPHardwareDataType | grep "Memory:"
+        df -h
+        echo "安装必要的系统依赖..."
         brew install create-dmg
     
     - name: Create PyInstaller spec file
@@ -94,11 +101,19 @@ jobs:
                 'scipy.tests',
                 'numpy.tests',
                 'sklearn.tests',
+                'test',
+                'tests',
+                'testing',
+                'unittest',
+                'doctest',
+                'pdb',
+                'pydoc',
             ],
             win_no_prefer_redirects=False,
             win_private_assemblies=False,
             cipher=block_cipher,
             noarchive=False,
+            optimize=2,  # 优化字节码
         )
 
         pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
@@ -112,15 +127,14 @@ jobs:
             debug=False,
             bootloader_ignore_signals=False,
             strip=False,
-            upx=True,
+            upx=False,  # 禁用UPX压缩以加快构建速度
             console=False,
             disable_windowed_traceback=False,
             argv_emulation=False,
             target_arch=None,
             codesign_identity=None,
             entitlements_file=None,
-            icon='src/qtpiccolor/resources/icon.ico' if sys.platform == 'win32' else 'src/qtpiccolor/resources/icon.icns',
-            version='version_info.txt' if sys.platform == 'win32' else None,
+            icon='src/qtpiccolor/resources/icon.icns',
         )
 
         coll = COLLECT(
@@ -129,82 +143,35 @@ jobs:
             a.zipfiles,
             a.datas,
             strip=False,
-            upx=True,
+            upx=False,  # 禁用UPX压缩以加快构建速度
             upx_exclude=[],
             name='qtPicColor',
         )
 
-        if sys.platform == 'darwin':
-            app = BUNDLE(
-                coll,
-                name='qtPicColor.app',
-                icon='src/qtpiccolor/resources/icon.icns',
-                bundle_identifier='com.qtpiccolor.app',
-                info_plist={
-                    'NSPrincipalClass': 'NSApplication',
-                    'NSAppleScriptEnabled': False,
-                    'NSHighResolutionCapable': True,
-                    'CFBundleShortVersionString': '${{ steps.version.outputs.version }}',
-                    'CFBundleVersion': '${{ steps.version.outputs.version }}',
-                    'CFBundleDisplayName': 'qtPicColor',
-                    'CFBundleName': 'qtPicColor',
-                    'CFBundleExecutable': 'qtPicColor',
-                    'CFBundlePackageType': 'APPL',
-                    'CFBundleSignature': '????',
-                    'LSMinimumSystemVersion': '10.15.0',
-                    'NSRequiresAquaSystemAppearance': False,
-                    'CFBundleDocumentTypes': [
-                        {
-                            'CFBundleTypeName': 'Image',
-                            'CFBundleTypeRole': 'Viewer',
-                            'LSItemContentTypes': ['public.image', 'public.jpeg', 'public.png'],
-                            'CFBundleTypeExtensions': ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff'],
-                        }
-                    ]
-                },
-            )
+        # 创建macOS应用包
+        app = BUNDLE(
+            coll,
+            name='qtPicColor.app',
+            icon='src/qtpiccolor/resources/icon.icns',
+            bundle_identifier='com.qtpiccolor.app',
+            info_plist={
+                'NSPrincipalClass': 'NSApplication',
+                'NSAppleScriptEnabled': False,
+                'NSHighResolutionCapable': True,
+                'CFBundleShortVersionString': '${{ steps.version.outputs.version }}',
+                'CFBundleVersion': '${{ steps.version.outputs.version }}',
+                'CFBundleDisplayName': 'qtPicColor',
+                'CFBundleName': 'qtPicColor',
+                'CFBundleExecutable': 'qtPicColor',
+                'CFBundlePackageType': 'APPL',
+                'CFBundleSignature': '????',
+                'LSMinimumSystemVersion': '10.15.0',
+                'NSRequiresAquaSystemAppearance': False,
+            },
+        )
         EOF
     
-    - name: Create Windows version info file
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        $version = "${{ steps.version.outputs.version }}"
-        $versionParts = $version.Split('.')
-        $major = $versionParts[0]
-        $minor = if ($versionParts.Length -gt 1) { $versionParts[1] } else { "0" }
-        $patch = if ($versionParts.Length -gt 2) { $versionParts[2] } else { "0" }
-        
-        @"
-        VSVersionInfo(
-          ffi=FixedFileInfo(
-            filevers=($major, $minor, $patch, $build),
-            prodvers=($major, $minor, $patch, $build),
-            mask=0x3f,
-            flags=0x0,
-            OS=0x40004,
-            fileType=0x1,
-            subtype=0x0,
-            date=(0, 0)
-          ),
-          kids=[
-            StringFileInfo(
-              [
-                StringTable(
-                  u'040904B0',
-                  [StringStruct(u'CompanyName', u'qtPicColor Team'),
-                   StringStruct(u'FileDescription', u'图片颜色分析工具'),
-                   StringStruct(u'FileVersion', u'$version'),
-                   StringStruct(u'InternalName', u'qtPicColor'),
-                   StringStruct(u'LegalCopyright', u'Copyright © 2024 qtPicColor Team'),
-                   StringStruct(u'OriginalFilename', u'qtPicColor.exe'),
-                   StringStruct(u'ProductName', u'qtPicColor'),
-                   StringStruct(u'ProductVersion', u'$version')])
-              ]),
-            VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
-          ]
-        )
-        "@ | Out-File -FilePath version_info.txt -Encoding UTF8
+
     
     - name: Create default icon files (if not exist)
       run: |
@@ -238,17 +205,12 @@ jobs:
         
         draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
         
-        # 保存为不同格式
-        if os.name == 'nt':  # Windows
-            img.save('src/qtpiccolor/resources/icon.ico', format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
-            print('Windows图标文件创建成功')
-        else:  # macOS/Linux
-            img.save('src/qtpiccolor/resources/icon.png')
-            print('PNG图标文件创建成功')
+        # 保存为PNG格式（macOS）
+        img.save('src/qtpiccolor/resources/icon.png')
+        print('PNG图标文件创建成功')
         "
     
     - name: Create macOS icon (ICNS)
-      if: runner.os == 'macOS'
       run: |
         # 创建iconset目录结构
         mkdir -p src/qtpiccolor/resources/icon.iconset
@@ -298,43 +260,38 @@ jobs:
         rm -rf src/qtpiccolor/resources/icon.iconset
     
     - name: Build with PyInstaller
+      timeout-minutes: 30  # 设置30分钟超时
       run: |
-        uv run pyinstaller qtpiccolor.spec --clean --noconfirm
+        echo "开始PyInstaller构建..."
+        echo "检查源文件..."
+        ls -la src/qtpiccolor/
+        echo "检查图标文件..."
+        ls -la src/qtpiccolor/resources/
+        echo "开始构建..."
+        uv run pyinstaller qtpiccolor.spec --clean --noconfirm --log-level INFO
+        echo "PyInstaller构建完成"
+        echo "检查构建结果..."
+        ls -la dist/
     
     - name: Test built application
       run: |
         echo "测试构建的应用程序..."
         
-        if [ "$RUNNER_OS" = "macOS" ]; then
-            # macOS测试
-            if [ -d "dist/qtPicColor.app" ]; then
-                echo "✓ qtPicColor.app 存在"
-                ls -la dist/qtPicColor.app/Contents/MacOS/
-                
-                # 测试应用程序是否可以启动（无GUI模式）
-                echo "测试应用程序启动..."
-                timeout 10s dist/qtPicColor.app/Contents/MacOS/qtPicColor --help || echo "应用程序测试完成"
-            else
-                echo "✗ qtPicColor.app 不存在"
-                exit 1
-            fi
-        elif [ "$RUNNER_OS" = "Windows" ]; then
-            # Windows测试
-            if [ -f "dist/qtPicColor/qtPicColor.exe" ]; then
-                echo "✓ qtPicColor.exe 存在"
-                ls -la dist/qtPicColor/
-                
-                # 测试应用程序是否可以启动（无GUI模式）
-                echo "测试应用程序启动..."
-                timeout 10s dist/qtPicColor/qtPicColor.exe --help || echo "应用程序测试完成"
-            else
-                echo "✗ qtPicColor.exe 不存在"
-                exit 1
-            fi
+        # macOS测试
+        if [ -d "dist/qtPicColor.app" ]; then
+            echo "✓ qtPicColor.app 存在"
+            ls -la dist/qtPicColor.app/Contents/MacOS/
+            
+            # 测试应用程序是否可以启动（无GUI模式）
+            echo "测试应用程序启动..."
+            timeout 10s dist/qtPicColor.app/Contents/MacOS/qtPicColor --help || echo "应用程序测试完成"
+        else
+            echo "✗ qtPicColor.app 不存在"
+            exit 1
         fi
     
     - name: Create DMG (macOS)
-      if: runner.os == 'macOS'
+      timeout-minutes: 15  # 设置15分钟超时
       run: |
         VERSION="${{ steps.version.outputs.version }}"
         
@@ -437,109 +394,9 @@ jobs:
         # 清理临时目录
         rm -rf "$DMG_DIR"
     
-    - name: Create Windows Installer
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        $version = "${{ steps.version.outputs.version }}"
-        $versionParts = $version.Split('.')
-        $major = $versionParts[0]
-        $minor = if ($versionParts.Length -gt 1) { $versionParts[1] } else { "0" }
-        $patch = if ($versionParts.Length -gt 2) { $versionParts[2] } else { "0" }
-        
-        # 安装NSIS
-        choco install nsis -y
-        
-        # 创建NSIS安装脚本
-        @"
-        !define APPNAME "qtPicColor"
-        !define COMPANYNAME "qtPicColor Team"
-        !define DESCRIPTION "图片颜色分析工具"
-        !define VERSIONMAJOR $major
-        !define VERSIONMINOR $minor
-        !define VERSIONBUILD $patch
-        !define VERSION "$version"
-        !define HELPURL "https://github.com/qtpiccolor/qtpiccolor"
-        !define UPDATEURL "https://github.com/qtpiccolor/qtpiccolor/releases"
-        !define ABOUTURL "https://github.com/qtpiccolor/qtpiccolor"
-        !define INSTALLSIZE 150000
 
-        RequestExecutionLevel admin
-        InstallDir "`$PROGRAMFILES\`${APPNAME}"
-        Name "`${APPNAME} v`${VERSION}"
-        Icon "src\qtpiccolor\resources\icon.ico"
-        outFile "dist\qtPicColor-v$version-Windows-Setup.exe"
-
-        !include LogicLib.nsh
-
-        page directory
-        page instfiles
-
-        !macro VerifyUserIsAdmin
-        UserInfo::GetAccountType
-        pop `$0
-        `${If} `$0 != "admin"
-            messageBox mb_iconstop "需要管理员权限才能安装此程序。"
-            setErrorLevel 740
-            quit
-        `${EndIf}
-        !macroend
-
-        function .onInit
-            setShellVarContext all
-            !insertmacro VerifyUserIsAdmin
-        functionEnd
-
-        section "install"
-            setOutPath `$INSTDIR
-            file /r "dist\qtPicColor\*"
-            
-            writeUninstaller "`$INSTDIR\uninstall.exe"
-
-            createDirectory "`$SMPROGRAMS\`${APPNAME}"
-            createShortCut "`$SMPROGRAMS\`${APPNAME}\`${APPNAME}.lnk" "`$INSTDIR\qtPicColor.exe" "" "`$INSTDIR\qtPicColor.exe"
-            createShortCut "`$DESKTOP\`${APPNAME}.lnk" "`$INSTDIR\qtPicColor.exe" "" "`$INSTDIR\qtPicColor.exe"
-
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayName" "`${APPNAME} - `${DESCRIPTION}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "UninstallString" "`$\"`$INSTDIR\uninstall.exe`$\""
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "QuietUninstallString" "`$\"`$INSTDIR\uninstall.exe`$\" /S"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "InstallLocation" "`$\"`$INSTDIR`$\""
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayIcon" "`$\"`$INSTDIR\qtPicColor.exe`$\""
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "Publisher" "`${COMPANYNAME}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "HelpLink" "`${HELPURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "URLUpdateInfo" "`${UPDATEURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "URLInfoAbout" "`${ABOUTURL}"
-            WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayVersion" "`${VERSION}"
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "VersionMajor" `${VERSIONMAJOR}
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "VersionMinor" `${VERSIONMINOR}
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "NoModify" 1
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "NoRepair" 1
-            WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "EstimatedSize" `${INSTALLSIZE}
-        sectionEnd
-
-        section "uninstall"
-            delete "`$SMPROGRAMS\`${APPNAME}\`${APPNAME}.lnk"
-            rmDir "`$SMPROGRAMS\`${APPNAME}"
-            delete "`$DESKTOP\`${APPNAME}.lnk"
-            
-            rmDir /r "`$INSTDIR"
-            
-            DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}"
-        sectionEnd
-        "@ | Out-File -FilePath installer.nsi -Encoding UTF8
-        
-        # 编译安装程序
-        & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
-    
-    - name: Create ZIP archive (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        $version = "${{ steps.version.outputs.version }}"
-        # 创建便携版ZIP
-        Compress-Archive -Path "dist\qtPicColor\*" -DestinationPath "dist\qtPicColor-v$version-Windows-Portable.zip"
     
     - name: Create ZIP archive (macOS)
-      if: runner.os == 'macOS'
       run: |
         VERSION="${{ steps.version.outputs.version }}"
         # 创建便携版ZIP
@@ -549,10 +406,9 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: qtPicColor-${{ runner.os }}-v${{ steps.version.outputs.version }}
+        name: qtPicColor-macOS-v${{ steps.version.outputs.version }}
         path: |
           dist/*.dmg
-          dist/*.exe
           dist/*.zip
         retention-days: 30
         if-no-files-found: warn
@@ -563,7 +419,6 @@ jobs:
       with:
         files: |
           dist/*.dmg
-          dist/*.exe
           dist/*.zip
         draft: false
         prerelease: false
